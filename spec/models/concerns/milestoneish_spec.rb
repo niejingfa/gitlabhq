@@ -7,7 +7,7 @@ describe Milestone, 'Milestoneish' do
   let(:member) { create(:user) }
   let(:guest) { create(:user) }
   let(:admin) { create(:admin) }
-  let(:project) { create(:empty_project, :public) }
+  let(:project) { create(:project, :public) }
   let(:milestone) { create(:milestone, project: project) }
   let!(:issue) { create(:issue, project: project, milestone: milestone) }
   let!(:security_issue_1) { create(:issue, :confidential, project: project, author: author, milestone: milestone) }
@@ -19,10 +19,41 @@ describe Milestone, 'Milestoneish' do
   let!(:closed_security_issue_3) { create(:issue, :confidential, :closed, project: project, author: author, milestone: milestone) }
   let!(:closed_security_issue_4) { create(:issue, :confidential, :closed, project: project, assignees: [assignee], milestone: milestone) }
   let!(:merge_request) { create(:merge_request, source_project: project, target_project: project, milestone: milestone) }
+  let(:label_1) { create(:label, title: 'label_1', project: project, priority: 1) }
+  let(:label_2) { create(:label, title: 'label_2', project: project, priority: 2) }
+  let(:label_3) { create(:label, title: 'label_3', project: project) }
 
   before do
-    project.team << [member, :developer]
-    project.team << [guest, :guest]
+    project.add_developer(member)
+    project.add_guest(guest)
+  end
+
+  describe '#sorted_issues' do
+    it 'sorts issues by label priority' do
+      issue.labels << label_1
+      security_issue_1.labels << label_2
+      closed_issue_1.labels << label_3
+
+      issues = milestone.sorted_issues(member)
+
+      expect(issues.first).to eq(issue)
+      expect(issues.second).to eq(security_issue_1)
+      expect(issues.third).not_to eq(closed_issue_1)
+    end
+  end
+
+  describe '#sorted_merge_requests' do
+    it 'sorts merge requests by label priority' do
+      merge_request_1 = create(:labeled_merge_request, labels: [label_2], source_project: project, source_branch: 'branch_1', milestone: milestone)
+      merge_request_2 = create(:labeled_merge_request, labels: [label_1], source_project: project, source_branch: 'branch_2', milestone: milestone)
+      merge_request_3 = create(:labeled_merge_request, labels: [label_3], source_project: project, source_branch: 'branch_3', milestone: milestone)
+
+      merge_requests = milestone.sorted_merge_requests
+
+      expect(merge_requests.first).to eq(merge_request_2)
+      expect(merge_requests.second).to eq(merge_request_1)
+      expect(merge_requests.third).to eq(merge_request_3)
+    end
   end
 
   describe '#closed_items_count' do
@@ -153,6 +184,23 @@ describe Milestone, 'Milestoneish' do
       milestone = build_stubbed(:milestone, start_date: Time.now - 2.days)
 
       expect(milestone.elapsed_days).to eq(2)
+    end
+  end
+
+  describe '#total_issue_time_spent' do
+    it 'calculates total issue time spent' do
+      closed_issue_1.spend_time(duration: 300, user_id: author.id)
+      closed_issue_1.save!
+      closed_issue_2.spend_time(duration: 600, user_id: assignee.id)
+      closed_issue_2.save!
+
+      expect(milestone.total_issue_time_spent).to eq(900)
+    end
+  end
+
+  describe '#human_total_issue_time_spent' do
+    it 'returns nil if no time has been spent' do
+      expect(milestone.human_total_issue_time_spent).to be_nil
     end
   end
 end

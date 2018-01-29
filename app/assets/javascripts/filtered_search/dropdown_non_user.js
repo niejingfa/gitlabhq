@@ -1,21 +1,22 @@
-/* global Flash */
-
-import Ajax from '~/droplab/plugins/ajax';
-import Filter from '~/droplab/plugins/filter';
+import Flash from '../flash';
+import Ajax from '../droplab/plugins/ajax';
+import Filter from '../droplab/plugins/filter';
 import './filtered_search_dropdown';
 
 class DropdownNonUser extends gl.FilteredSearchDropdown {
-  constructor(droplab, dropdown, input, tokenKeys, filter, endpoint, symbol) {
-    super(droplab, dropdown, input, filter);
+  constructor(options = {}) {
+    const { input, endpoint, symbol, preprocessing } = options;
+    super(options);
     this.symbol = symbol;
     this.config = {
       Ajax: {
         endpoint,
         method: 'setData',
         loadingTemplate: this.loadingTemplate,
+        preprocessing,
         onError() {
           /* eslint-disable no-new */
-          new Flash('An error occured fetching the dropdown data.');
+          new Flash('An error occurred fetching the dropdown data.');
           /* eslint-enable no-new */
         },
       },

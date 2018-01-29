@@ -1,6 +1,7 @@
 class Event < ActiveRecord::Base
   include Sortable
-  default_scope { reorder(nil).where.not(author_id: nil) }
+  include IgnorableColumn
+  default_scope { reorder(nil) }
 
   CREATED   = 1
   UPDATED   = 2
@@ -47,10 +48,19 @@ class Event < ActiveRecord::Base
 
   belongs_to :author, class_name: "User"
   belongs_to :project
-  belongs_to :target, polymorphic: true # rubocop:disable Cop/PolymorphicAssociations
 
-  # For Hash only
-  serialize :data # rubocop:disable Cop/ActiverecordSerialize
+  belongs_to :target, -> {
+    # If the association for "target" defines an "author" association we want to
+    # eager-load this so Banzai & friends don't end up performing N+1 queries to
+    # get the authors of notes, issues, etc.
+    if reflections['events'].active_record.reflect_on_association(:author)
+      includes(:author)
+    else
+      self
+    end
+  }, polymorphic: true # rubocop:disable Cop/PolymorphicAssociations
+
+  has_one :push_event_payload
 
   # Callbacks
   after_create :reset_project_activity
@@ -60,14 +70,59 @@ class Event < ActiveRecord::Base
   scope :recent, -> { reorder(id: :desc) }
   scope :code_push, -> { where(action: PUSHED) }
 
-  scope :in_projects, ->(projects) do
-    where(project_id: projects.pluck(:id)).recent
+  scope :in_projects, -> (projects) do
+    sub_query = projects
+      .except(:order)
+      .select(1)
+      .where('projects.id = events.project_id')
+
+    where('EXISTS (?)', sub_query).recent
   end
 
-  scope :with_associations, -> { includes(:author, :project, project: :namespace).preload(:target) }
+  scope :with_associations, -> do
+    # We're using preload for "push_event_payload" as otherwise the association
+    # is not always available (depending on the query being built).
+    includes(:author, :project, project: :namespace)
+      .preload(:target, :push_event_payload)
+  end
+
   scope :for_milestone_id, ->(milestone_id) { where(target_type: "Milestone", target_id: milestone_id) }
 
+  # Authors are required as they're used to display who pushed data.
+  #
+  # We're just validating the presence of the ID here as foreign key constraints
+  # should ensure the ID points to a valid user.
+  validates :author_id, presence: true
+
+  self.inheritance_column = 'action'
+
+  # "data" will be removed in 10.0 but it may be possible that JOINs happen that
+  # include this column, hence we're ignoring it as well.
+  ignore_column :data
+
   class << self
+    def model_name
+      ActiveModel::Name.new(self, nil, 'event')
+    end
+
+    def find_sti_class(action)
+      if action.to_i == PUSHED
+        PushEvent
+      else
+        Event
+      end
+    end
+
+    def subclass_from_attributes(attrs)
+      # Without this Rails will keep calling this method on the returned class,
+      # resulting in an infinite loop.
+      return unless self == Event
+
+      action = attrs.with_indifferent_access[inheritance_column].to_i
+
+      PushEvent if action == PUSHED
+    end
+
     # Update Gitlab::ContributionsCalendar#activity_dates if this changes
     def contributions
       where("action = ? OR (target_type IN (?) AND action IN (?)) OR (target_type = ? AND action = ?)",
@@ -122,7 +177,7 @@ class Event < ActiveRecord::Base
   end
 
   def push?
-    action == PUSHED && valid_push?
+    false
   end
 
   def merged?
@@ -203,13 +258,7 @@ class Event < ActiveRecord::Base
 
   def action_name
     if push?
-      if new_ref?
-        "pushed new"
-      elsif rm_ref?
-        "deleted"
-      else
-        "pushed to"
-      end
+      push_action_name
     elsif closed?
       "closed"
     elsif merged?
@@ -225,85 +274,10 @@ class Event < ActiveRecord::Base
     elsif commented?
       "commented on"
     elsif created_project?
-      if project.external_import?
-        "imported"
-      else
-        "created"
-      end
+      created_project_action_name
     else
       "opened"
     end
-  end
-
-  def valid_push?
-    data[:ref] && ref_name.present?
-  rescue
-    false
-  end
-
-  def tag?
-    Gitlab::Git.tag_ref?(data[:ref])
-  end
-
-  def branch?
-    Gitlab::Git.branch_ref?(data[:ref])
-  end
-
-  def new_ref?
-    Gitlab::Git.blank_ref?(commit_from)
-  end
-
-  def rm_ref?
-    Gitlab::Git.blank_ref?(commit_to)
-  end
-
-  def md_ref?
-    !(rm_ref? || new_ref?)
-  end
-
-  def commit_from
-    data[:before]
-  end
-
-  def commit_to
-    data[:after]
-  end
-
-  def ref_name
-    if tag?
-      tag_name
-    else
-      branch_name
-    end
-  end
-
-  def branch_name
-    @branch_name ||= Gitlab::Git.ref_name(data[:ref])
-  end
-
-  def tag_name
-    @tag_name ||= Gitlab::Git.ref_name(data[:ref])
-  end
-
-  # Max 20 commits from push DESC
-  def commits
-    @commits ||= (data[:commits] || []).reverse
-  end
-
-  def commits_count
-    data[:total_commits_count] || commits.count || 0
-  end
-
-  def ref_type
-    tag? ? "tag" : "branch"
-  end
-
-  def push_with_commits?
-    !commits.empty? && commit_from && commit_to
-  end
-
-  def last_push_to_non_root?
-    branch? && project.default_branch != branch_name
   end
 
   def target_iid
@@ -359,7 +333,7 @@ class Event < ActiveRecord::Base
 
   def body?
     if push?
-      push_with_commits? || rm_ref?
+      push_with_commits?
     elsif note?
       true
     else
@@ -376,23 +350,47 @@ class Event < ActiveRecord::Base
     # At this point it's possible for multiple threads/processes to try to
     # update the project. Only one query should actually perform the update,
     # hence we add the extra WHERE clause for last_activity_at.
-    Project.unscoped.where(id: project_id).
-      where('last_activity_at <= ?', RESET_PROJECT_ACTIVITY_INTERVAL.ago).
-      update_all(last_activity_at: created_at)
+    Project.unscoped.where(id: project_id)
+      .where('last_activity_at <= ?', RESET_PROJECT_ACTIVITY_INTERVAL.ago)
+      .update_all(last_activity_at: created_at)
   end
 
   def authored_by?(user)
     user ? author_id == user.id : false
   end
 
+  def to_partial_path
+    # We are intentionally using `Event` rather than `self.class` so that
+    # subclasses also use the `Event` implementation.
+    Event._to_partial_path
+  end
+
   private
+
+  def push_action_name
+    if new_ref?
+      "pushed new"
+    elsif rm_ref?
+      "deleted"
+    else
+      "pushed to"
+    end
+  end
+
+  def created_project_action_name
+    if project.external_import?
+      "imported"
+    else
+      "created"
+    end
+  end
 
   def recent_update?
     project.last_activity_at > RESET_PROJECT_ACTIVITY_INTERVAL.ago
   end
 
   def set_last_repository_updated_at
-    Project.unscoped.where(id: project_id).
-      update_all(last_repository_updated_at: created_at)
+    Project.unscoped.where(id: project_id)
+      .update_all(last_repository_updated_at: created_at)
   end
 end

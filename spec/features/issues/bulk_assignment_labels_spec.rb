@@ -1,6 +1,6 @@
 require 'rails_helper'
 
-feature 'Issues > Labels bulk assignment', feature: true do
+feature 'Issues > Labels bulk assignment' do
   let(:user)      { create(:user) }
   let!(:project)  { create(:project) }
   let!(:issue1)   { create(:issue, project: project, title: "Issue 1") }
@@ -9,11 +9,26 @@ feature 'Issues > Labels bulk assignment', feature: true do
   let!(:feature)  { create(:label, project: project, title: 'feature') }
   let!(:wontfix)  { create(:label, project: project, title: 'wontfix') }
 
-  context 'as an allowed user', js: true do
+  context 'as an allowed user', :js do
     before do
-      project.team << [user, :master]
+      project.add_master(user)
 
-      login_as user
+      sign_in user
+    end
+
+    context 'sidebar' do
+      before do
+        enable_bulk_update
+      end
+
+      it 'is present when bulk edit is enabled' do
+        expect(page).to have_css('.issuable-sidebar')
+      end
+
+      it 'is not present when bulk edit is disabled' do
+        disable_bulk_update
+        expect(page).not_to have_css('.issuable-sidebar')
+      end
     end
 
     context 'can bulk assign' do
@@ -331,14 +346,14 @@ feature 'Issues > Labels bulk assignment', feature: true do
 
   context 'as a guest' do
     before do
-      login_as user
+      sign_in user
 
-      visit namespace_project_issues_path(project.namespace, project)
+      visit project_issues_path(project)
     end
 
     context 'cannot bulk assign labels' do
       it do
-        expect(page).not_to have_button 'Edit Issues'
+        expect(page).not_to have_button 'Edit issues'
         expect(page).not_to have_css '.check-all-issues'
         expect(page).not_to have_css '.issue-check'
       end
@@ -362,6 +377,7 @@ feature 'Issues > Labels bulk assignment', feature: true do
       items.map do |item|
         click_link item
       end
+
       if unmark
         items.map do |item|
           # Make sure we are unmarking the item no matter the state it has currently
@@ -390,12 +406,16 @@ feature 'Issues > Labels bulk assignment', feature: true do
   end
 
   def update_issues
-    click_button 'Update all'
+    find('.update-selected-issues').click
     wait_for_requests
   end
 
   def enable_bulk_update
-    visit namespace_project_issues_path(project.namespace, project)
-    click_button 'Edit Issues'
+    visit project_issues_path(project)
+    click_button 'Edit issues'
+  end
+
+  def disable_bulk_update
+    click_button 'Cancel'
   end
 end

@@ -11,8 +11,8 @@ class JwtController < ApplicationController
     service = SERVICES[params[:service]]
     return head :not_found unless service
 
-    result = service.new(@authentication_result.project, @authentication_result.actor, auth_params).
-      execute(authentication_abilities: @authentication_result.authentication_abilities)
+    result = service.new(@authentication_result.project, @authentication_result.actor, auth_params)
+      .execute(authentication_abilities: @authentication_result.authentication_abilities)
 
     render json: result, status: result[:http_status]
   end
@@ -30,11 +30,11 @@ class JwtController < ApplicationController
         render_unauthorized
       end
     end
-  rescue Gitlab::Auth::MissingPersonalTokenError
-    render_missing_personal_token
+  rescue Gitlab::Auth::MissingPersonalAccessTokenError
+    render_missing_personal_access_token
   end
 
-  def render_missing_personal_token
+  def render_missing_personal_access_token
     render json: {
       errors: [
         { code: 'UNAUTHORIZED',

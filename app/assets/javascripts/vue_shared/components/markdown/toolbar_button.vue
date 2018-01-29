@@ -1,10 +1,14 @@
 <script>
-  import tooltipMixin from '../../mixins/tooltip';
+  import tooltip from '../../directives/tooltip';
+  import icon from '../icon.vue';
 
   export default {
-    mixins: [
-      tooltipMixin,
-    ],
+    components: {
+      icon,
+    },
+    directives: {
+      tooltip,
+    },
     props: {
       buttonTitle: {
         type: String,
@@ -29,30 +33,24 @@
         default: false,
       },
     },
-    computed: {
-      iconClass() {
-        return `fa-${this.icon}`;
-      },
-    },
   };
 </script>
 
 <template>
   <button
+    v-tooltip
     type="button"
-    class="toolbar-btn js-md hidden-xs"
+    class="toolbar-btn js-md"
     tabindex="-1"
-    ref="tooltip"
     data-container="body"
     :data-md-tag="tag"
     :data-md-block="tagBlock"
     :data-md-prepend="prepend"
     :title="buttonTitle"
-    :aria-label="buttonTitle">
-    <i
-      aria-hidden="true"
-      class="fa fa-fw"
-      :class="iconClass">
-    </i>
+    :aria-label="buttonTitle"
+  >
+    <icon
+      :name="icon"
+    />
   </button>
 </template>

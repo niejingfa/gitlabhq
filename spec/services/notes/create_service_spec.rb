@@ -1,7 +1,7 @@
 require 'spec_helper'
 
-describe Notes::CreateService, services: true do
-  let(:project) { create(:empty_project) }
+describe Notes::CreateService do
+  let(:project) { create(:project) }
   let(:issue) { create(:issue, project: project) }
   let(:user) { create(:user) }
   let(:opts) do
@@ -10,7 +10,7 @@ describe Notes::CreateService, services: true do
 
   describe '#execute' do
     before do
-      project.team << [user, :master]
+      project.add_master(user)
     end
 
     context "valid params" do

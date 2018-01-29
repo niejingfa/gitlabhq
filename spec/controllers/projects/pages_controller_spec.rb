@@ -2,7 +2,7 @@ require 'spec_helper'
 
 describe Projects::PagesController do
   let(:user) { create(:user) }
-  let(:project) { create(:empty_project, :public, :access_requestable) }
+  let(:project) { create(:project, :public) }
 
   let(:request_params) do
     {
@@ -21,7 +21,18 @@ describe Projects::PagesController do
     it 'returns 200 status' do
       get :show, request_params
 
-      expect(response).to have_http_status(200)
+      expect(response).to have_gitlab_http_status(200)
+    end
+
+    context 'when the project is in a subgroup' do
+      let(:group) { create(:group, :nested) }
+      let(:project) { create(:project, namespace: group) }
+
+      it 'returns a 404 status code' do
+        get :show, request_params
+
+        expect(response).to have_gitlab_http_status(404)
+      end
     end
   end
 
@@ -29,7 +40,7 @@ describe Projects::PagesController do
     it 'returns 302 status' do
       delete :destroy, request_params
 
-      expect(response).to have_http_status(302)
+      expect(response).to have_gitlab_http_status(302)
     end
   end
 
@@ -42,7 +53,7 @@ describe Projects::PagesController do
       it 'returns 404 status' do
         get :show, request_params
 
-        expect(response).to have_http_status(404)
+        expect(response).to have_gitlab_http_status(404)
       end
     end
 
@@ -50,7 +61,7 @@ describe Projects::PagesController do
       it 'returns 404 status' do
         delete :destroy, request_params
 
-        expect(response).to have_http_status(404)
+        expect(response).to have_gitlab_http_status(404)
       end
     end
   end

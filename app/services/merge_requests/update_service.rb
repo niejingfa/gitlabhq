@@ -7,7 +7,7 @@ module MergeRequests
       params.except!(:target_project_id)
       params.except!(:source_branch)
 
-      merge_from_slash_command(merge_request) if params[:merge]
+      merge_from_quick_action(merge_request) if params[:merge]
 
       if merge_request.closed_without_fork?
         params.except!(:target_branch, :force_remove_source_branch)
@@ -22,8 +22,9 @@ module MergeRequests
     end
 
     def handle_changes(merge_request, options)
-      old_labels = options[:old_labels] || []
-      old_mentioned_users = options[:old_mentioned_users] || []
+      old_associations = options.fetch(:old_associations, {})
+      old_labels = old_associations.fetch(:labels, [])
+      old_mentioned_users = old_associations.fetch(:mentioned_users, [])
 
       if has_changes?(merge_request, old_labels: old_labels)
         todo_service.mark_pending_todos_as_done(merge_request, current_user)
@@ -38,10 +39,6 @@ module MergeRequests
         create_branch_change_note(merge_request, 'target',
                                   merge_request.previous_changes['target_branch'].first,
                                   merge_request.target_branch)
-      end
-
-      if merge_request.previous_changes.include?('milestone_id')
-        create_milestone_note(merge_request)
       end
 
       if merge_request.previous_changes.include?('assignee_id')
@@ -74,16 +71,16 @@ module MergeRequests
       end
     end
 
-    def merge_from_slash_command(merge_request)
+    def merge_from_quick_action(merge_request)
       last_diff_sha = params.delete(:merge)
-      return unless merge_request.mergeable_with_slash_command?(current_user, last_diff_sha: last_diff_sha)
+      return unless merge_request.mergeable_with_quick_action?(current_user, last_diff_sha: last_diff_sha)
 
       merge_request.update(merge_error: nil)
 
       if merge_request.head_pipeline && merge_request.head_pipeline.active?
         MergeRequests::MergeWhenPipelineSucceedsService.new(project, current_user).execute(merge_request)
       else
-        MergeWorker.perform_async(merge_request.id, current_user.id, {})
+        merge_request.merge_async(current_user.id, {})
       end
     end
 
@@ -110,6 +107,12 @@ module MergeRequests
                          when 'unwip' then MergeRequest.wipless_title(title)
                          end
       end
+    end
+
+    def create_branch_change_note(issuable, branch_type, old_branch, new_branch)
+      SystemNoteService.change_branch(
+        issuable, issuable.project, current_user, branch_type,
+        old_branch, new_branch)
     end
   end
 end

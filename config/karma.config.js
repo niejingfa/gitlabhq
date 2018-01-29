@@ -8,6 +8,7 @@ if (webpackConfig.plugins) {
   webpackConfig.plugins = webpackConfig.plugins.filter(function (plugin) {
     return !(
       plugin instanceof webpack.optimize.CommonsChunkPlugin ||
+      plugin instanceof webpack.optimize.ModuleConcatenationPlugin ||
       plugin instanceof webpack.DefinePlugin
     );
   });
@@ -17,6 +18,8 @@ webpackConfig.devtool = 'cheap-inline-source-map';
 
 // Karma configuration
 module.exports = function(config) {
+  process.env.TZ = 'Etc/UTC';
+
   var progressReporter = process.env.CI ? 'mocha' : 'progress';
 
   var karmaConfig = {
@@ -54,6 +57,7 @@ module.exports = function(config) {
       subdir: '.',
       fixWebpackSourcePaths: true
     };
+    karmaConfig.browserNoActivityTimeout = 60000; // 60 seconds
   }
 
   if (process.env.DEBUG) {

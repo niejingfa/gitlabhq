@@ -21,14 +21,16 @@ Once you fill in all the details, hit the **Create milestone** button.
 >**Note:**
 You need [Master permissions](../../permissions.md) in order to create a milestone.
 
-You can create a milestone for several projects in the same group simultaneously.
-On the group's **Issues ➔ Milestones** page, you will be able to see the status
-of that milestone across all of the selected projects. To create a new milestone
-for selected projects in the group, click the **New milestone** button. The
-form is the same as when creating a milestone for a specific project with the
-addition of the selection of the projects you want to inherit this milestone.
+You can create a milestone for a group that will be shared across group projects.
+On the group's **Issues ➔ Milestones** page, you will be able to see the state
+of that milestone and the issues/merge requests count that it shares across the group projects. To create a new milestone click the **New milestone** button. The form is the same as when creating a milestone for a specific project which you can find in the previous item.
 
-![Creating a group milestone](img/milestone_group_create.png)
+In addition to that you will be able to filter issues or merge requests by group milestones in all projects that belongs to the milestone group.
+
+## Milestone promotion
+
+Project milestones can be promoted to group milestones if its project belongs to a group. When a milestone is promoted all other milestones across the group projects with the same title will be merged into it, which means all milestone's children like issues, merge requests and boards will be moved into the new promoted milestone.
+The promote button can be found in the milestone view or milestones list.
 
 ## Special milestone filters
 
@@ -45,10 +47,17 @@ special options available when filtering by milestone:
   date less than today. Note that this can return results from several
   milestones in the same project.
 
-## Milestone progress statistics
+## Milestone sidebar
 
-Milestone statistics can be viewed in the milestone sidebar. The milestone percentage statistic
-is calculated as; closed and merged merge requests plus all closed issues divided by
+The milestone sidebar shows percentage complete, start date and due date,
+issues, total issue weight, total issue time spent, and merge requests.
+
+The percentage complete is calculated as: Closed and merged merge requests plus all closed issues divided by
 total merge requests and issues.
 
-![Milestone statistics](img/progress.png)
+![Milestone sidebar](img/sidebar.png)
+
+## Quick actions
+
+[Quick actions](../quick_actions.md) are available for assigning and removing
+project and group milestones.

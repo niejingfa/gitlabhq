@@ -1,9 +1,13 @@
 - page_title "Issues"
-= render "head_issues"
+- group_issues_exists = group_issues(@group).exists?
 = content_for :meta_tags do
   = auto_discovery_link_tag(:atom, params.merge(rss_url_options), title: "#{@group.name} issues")
 
-- if group_issues(@group).exists?
+- content_for :page_specific_javascripts do
+  = webpack_bundle_tag 'common_vue'
+  = webpack_bundle_tag 'filtered_search'
+
+- if group_issues_exists
   .top-area
     = render 'shared/issuable/nav', type: :issues
     .nav-controls
@@ -11,16 +15,9 @@
         = icon('rss')
         %span.icon-label
           Subscribe
-      = render 'shared/new_project_item_select', path: 'issues/new', label: "New issue"
+      = render 'shared/new_project_item_select', path: 'issues/new', label: "New issue", type: :issues
 
-  = render 'shared/issuable/filter', type: :issues
-
-  .row-content-block.second-block
-    Only issues from the
-    %strong= @group.name
-    group are listed here.
-    - if current_user
-      To see all issues you should visit #{link_to 'dashboard', issues_dashboard_path} page.
+  = render 'shared/issuable/search_bar', type: :issues
 
   = render 'shared/issues'
 - else

@@ -1,7 +1,7 @@
 /* eslint-disable space-before-function-paren, no-var, one-var, one-var-declaration-per-line, no-unused-expressions, comma-dangle, new-parens, no-unused-vars, quotes, jasmine/no-spec-dupes, prefer-template, max-len */
 
 import Cookies from 'js-cookie';
-import AwardsHandler from '~/awards_handler';
+import loadAwardsHandler from '~/awards_handler';
 
 import '~/lib/utils/common_utils';
 
@@ -25,15 +25,15 @@ import '~/lib/utils/common_utils';
   };
 
   describe('AwardsHandler', function() {
-    preloadFixtures('issues/issue_with_comment.html.raw');
-    beforeEach(function() {
-      loadFixtures('issues/issue_with_comment.html.raw');
-      awardsHandler = new AwardsHandler;
-      spyOn(awardsHandler, 'postEmoji').and.callFake((function(_this) {
-        return function(button, url, emoji, cb) {
-          return cb();
-        };
-      })(this));
+    preloadFixtures('merge_requests/diff_comment.html.raw');
+    beforeEach(function(done) {
+      loadFixtures('merge_requests/diff_comment.html.raw');
+      $('body').attr('data-page', 'projects:merge_requests:show');
+      loadAwardsHandler(true).then((obj) => {
+        awardsHandler = obj;
+        spyOn(awardsHandler, 'postEmoji').and.callFake((button, url, emoji, cb) => cb());
+        done();
+      }).catch(fail);
 
       let isEmojiMenuBuilt = false;
       openAndWaitForEmojiMenu = function() {
@@ -54,6 +54,9 @@ import '~/lib/utils/common_utils';
     afterEach(function() {
       // restore original url root value
       gon.relative_url_root = urlRoot;
+
+      // Undo what we did to the shared <body>
+      $('body').removeAttr('data-page');
 
       awardsHandler.destroy();
     });
@@ -140,7 +143,7 @@ import '~/lib/utils/common_utils';
     });
     describe('::getAwardUrl', function() {
       return it('returns the url for request', function() {
-        return expect(awardsHandler.getAwardUrl()).toBe('http://test.host/frontend-fixtures/issues-project/issues/1/toggle_award_emoji');
+        return expect(awardsHandler.getAwardUrl()).toBe('http://test.host/frontend-fixtures/merge-requests-project/merge_requests/1/toggle_award_emoji');
       });
     });
     describe('::addAward and ::checkMutuality', function() {

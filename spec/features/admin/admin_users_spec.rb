@@ -1,11 +1,15 @@
 require 'spec_helper'
 
-describe "Admin::Users", feature: true do
+describe "Admin::Users" do
   let!(:user) do
     create(:omniauth_user, provider: 'twitter', extern_uid: '123456')
   end
 
-  let!(:current_user) { login_as :admin }
+  let!(:current_user) { create(:admin) }
+
+  before do
+    sign_in(current_user)
+  end
 
   describe "GET /admin/users" do
     before do
@@ -78,10 +82,10 @@ describe "Admin::Users", feature: true do
     it "applies defaults to user" do
       click_button "Create user"
       user = User.find_by(username: 'bang')
-      expect(user.projects_limit).
-        to eq(Gitlab.config.gitlab.default_projects_limit)
-      expect(user.can_create_group).
-        to eq(Gitlab.config.gitlab.default_can_create_group)
+      expect(user.projects_limit)
+        .to eq(Gitlab.config.gitlab.default_projects_limit)
+      expect(user.can_create_group)
+        .to eq(Gitlab.config.gitlab.default_can_create_group)
     end
 
     it "creates user with valid data" do
@@ -163,19 +167,36 @@ describe "Admin::Users", feature: true do
         it 'sees impersonation log out icon' do
           icon = first('.fa.fa-user-secret')
 
-          expect(icon).not_to eql nil
+          expect(icon).not_to be nil
         end
 
         it 'logs out of impersonated user back to original user' do
           find(:css, 'li.impersonation a').click
 
-          expect(page.find(:css, '.header-user .profile-link')['data-user']).to eql(current_user.username)
+          expect(page.find(:css, '.header-user .profile-link')['data-user']).to eq(current_user.username)
         end
 
         it 'is redirected back to the impersonated users page in the admin after stopping' do
           find(:css, 'li.impersonation a').click
 
-          expect(current_path).to eql "/admin/users/#{another_user.username}"
+          expect(current_path).to eq("/admin/users/#{another_user.username}")
+        end
+      end
+
+      context 'when impersonating a user with an expired password' do
+        before do
+          another_user.update(password_expires_at: Time.now - 5.minutes)
+          click_link 'Impersonate'
+        end
+
+        it 'does not redirect to password change page' do
+          expect(current_path).to eq('/')
+        end
+
+        it 'is redirected back to the impersonated users page in the admin after stopping' do
+          find(:css, 'li.impersonation a').click
+
+          expect(current_path).to eq("/admin/users/#{another_user.username}")
         end
       end
     end
@@ -284,9 +305,9 @@ describe "Admin::Users", feature: true do
       end
     end
 
-    it 'allows group membership to be revoked', js: true do
+    it 'allows group membership to be revoked', :js do
       page.within(first('.group_member')) do
-        find('.btn-remove').click
+        accept_confirm { find('.btn-remove').click }
       end
       wait_for_requests
 
@@ -305,7 +326,7 @@ describe "Admin::Users", feature: true do
     end
   end
 
-  describe 'remove users secondary email', js: true do
+  describe 'remove users secondary email', :js do
     let!(:secondary_email) do
       create :email, email: 'secondary@example.com', user: user
     end
@@ -315,7 +336,7 @@ describe "Admin::Users", feature: true do
 
       expect(page).to have_content("Secondary email: #{secondary_email.email}")
 
-      find("#remove_email_#{secondary_email.id}").click
+      accept_confirm { find("#remove_email_#{secondary_email.id}").click }
 
       expect(page).not_to have_content(secondary_email.email)
     end

@@ -1,7 +1,6 @@
 # Worker for updating any project specific caches.
 class PropagateServiceTemplateWorker
-  include Sidekiq::Worker
-  include DedicatedSidekiqQueue
+  include ApplicationWorker
 
   LEASE_TIMEOUT = 4.hours.to_i
 
@@ -14,8 +13,8 @@ class PropagateServiceTemplateWorker
   private
 
   def try_obtain_lease_for(template_id)
-    Gitlab::ExclusiveLease.
-      new("propagate_service_template_worker:#{template_id}", timeout: LEASE_TIMEOUT).
-      try_obtain
+    Gitlab::ExclusiveLease
+      .new("propagate_service_template_worker:#{template_id}", timeout: LEASE_TIMEOUT)
+      .try_obtain
   end
 end

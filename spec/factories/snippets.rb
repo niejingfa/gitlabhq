@@ -1,4 +1,4 @@
-FactoryGirl.define do
+FactoryBot.define do
   factory :snippet do
     author
     title { generate(:title) }
@@ -17,5 +17,12 @@ FactoryGirl.define do
     trait :private do
       visibility_level Snippet::PRIVATE
     end
+  end
+
+  factory :project_snippet, parent: :snippet, class: :ProjectSnippet do
+    project
+  end
+
+  factory :personal_snippet, parent: :snippet, class: :PersonalSnippet do
   end
 end

@@ -1,16 +1,16 @@
 require 'spec_helper'
 
-describe CommitStatus, :models do
-  let(:project) { create(:project, :repository) }
+describe CommitStatus do
+  set(:project) { create(:project, :repository) }
 
-  let(:pipeline) do
+  set(:pipeline) do
     create(:ci_pipeline, project: project, sha: project.commit.id)
   end
 
-  let(:commit_status) { create_status }
+  let(:commit_status) { create_status(stage: 'test') }
 
-  def create_status(args = {})
-    create(:commit_status, args.merge(pipeline: pipeline))
+  def create_status(**opts)
+    create(:commit_status, pipeline: pipeline, **opts)
   end
 
   it { is_expected.to belong_to(:pipeline) }
@@ -284,6 +284,41 @@ describe CommitStatus, :models do
     end
   end
 
+  describe '.status' do
+    context 'when there are multiple statuses present' do
+      before do
+        create_status(status: 'running')
+        create_status(status: 'success')
+        create_status(allow_failure: true, status: 'failed')
+      end
+
+      it 'returns a correct compound status' do
+        expect(described_class.all.status).to eq 'running'
+      end
+    end
+
+    context 'when there are only allowed to fail commit statuses present' do
+      before do
+        create_status(allow_failure: true, status: 'failed')
+      end
+
+      it 'returns status that indicates success' do
+        expect(described_class.all.status).to eq 'success'
+      end
+    end
+
+    context 'when using a scope to select latest statuses' do
+      before do
+        create_status(name: 'test', retried: true, status: 'failed')
+        create_status(allow_failure: true, name: 'test', status: 'failed')
+      end
+
+      it 'returns status according to the scope' do
+        expect(described_class.latest.status).to eq 'success'
+      end
+    end
+  end
+
   describe '#before_sha' do
     subject { commit_status.before_sha }
 
@@ -390,7 +425,7 @@ describe CommitStatus, :models do
       end
 
       it "raise exception when trying to update" do
-        expect{ commit_status.save }.to raise_error(ActiveRecord::StaleObjectError)
+        expect { commit_status.save }.to raise_error(ActiveRecord::StaleObjectError)
       end
     end
 
@@ -405,6 +440,96 @@ describe CommitStatus, :models do
 
       it "save correctly" do
         expect(commit_status.save).to be true
+      end
+    end
+  end
+
+  describe 'set failure_reason when drop' do
+    let(:commit_status) { create(:commit_status, :created) }
+
+    subject do
+      commit_status.drop!(reason)
+      commit_status
+    end
+
+    context 'when failure_reason is nil' do
+      let(:reason) { }
+
+      it { is_expected.to be_unknown_failure }
+    end
+
+    context 'when failure_reason is script_failure' do
+      let(:reason) { :script_failure }
+
+      it { is_expected.to be_script_failure }
+    end
+  end
+
+  describe 'ensure stage assignment' do
+    context 'when commit status has a stage_id assigned' do
+      let!(:stage) do
+        create(:ci_stage_entity, project: project, pipeline: pipeline)
+      end
+
+      let(:commit_status) do
+        create(:commit_status, stage_id: stage.id, name: 'rspec', stage: 'test')
+      end
+
+      it 'does not create a new stage' do
+        expect { commit_status }.not_to change { Ci::Stage.count }
+        expect(commit_status.stage_id).to eq stage.id
+      end
+    end
+
+    context 'when commit status does not have a stage_id assigned' do
+      let(:commit_status) do
+        create(:commit_status, name: 'rspec', stage: 'test', status: :success)
+      end
+
+      let(:stage) { Ci::Stage.first }
+
+      it 'creates a new stage' do
+        expect { commit_status }.to change { Ci::Stage.count }.by(1)
+
+        expect(stage.name).to eq 'test'
+        expect(stage.project).to eq commit_status.project
+        expect(stage.pipeline).to eq commit_status.pipeline
+        expect(stage.status).to eq commit_status.status
+        expect(commit_status.stage_id).to eq stage.id
+      end
+    end
+
+    context 'when commit status does not have stage but it exists' do
+      let!(:stage) do
+        create(:ci_stage_entity, project: project,
+                                 pipeline: pipeline,
+                                 name: 'test')
+      end
+
+      let(:commit_status) do
+        create(:commit_status, project: project,
+                               pipeline: pipeline,
+                               name: 'rspec',
+                               stage: 'test',
+                               status: :success)
+      end
+
+      it 'uses existing stage' do
+        expect { commit_status }.not_to change { Ci::Stage.count }
+
+        expect(commit_status.stage_id).to eq stage.id
+        expect(stage.reload.status).to eq commit_status.status
+      end
+    end
+
+    context 'when commit status is being imported' do
+      let(:commit_status) do
+        create(:commit_status, name: 'rspec', stage: 'test', importing: true)
+      end
+
+      it 'does not create a new stage' do
+        expect { commit_status }.not_to change { Ci::Stage.count }
+        expect(commit_status.stage_id).not_to be_present
       end
     end
   end

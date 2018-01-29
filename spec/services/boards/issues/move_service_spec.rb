@@ -1,9 +1,9 @@
 require 'spec_helper'
 
-describe Boards::Issues::MoveService, services: true do
+describe Boards::Issues::MoveService do
   describe '#execute' do
     let(:user)    { create(:user) }
-    let(:project) { create(:empty_project) }
+    let(:project) { create(:project) }
     let(:board1)  { create(:board, project: project) }
 
     let(:bug) { create(:label, project: project, name: 'Bug') }
@@ -15,7 +15,7 @@ describe Boards::Issues::MoveService, services: true do
     let!(:closed)  { create(:closed_list, board: board1) }
 
     before do
-      project.team << [user, :developer]
+      project.add_developer(user)
     end
 
     context 'when moving an issue between lists' do
@@ -73,7 +73,7 @@ describe Boards::Issues::MoveService, services: true do
         issue.reload
 
         expect(issue.labels).to contain_exactly(bug, testing)
-        expect(issue).to be_reopened
+        expect(issue).to be_opened
       end
     end
 
@@ -98,7 +98,7 @@ describe Boards::Issues::MoveService, services: true do
           issue.move_to_end && issue.save!
         end
 
-        params.merge!(move_after_iid: issue1.iid, move_before_iid: issue2.iid)
+        params.merge!(move_after_id: issue1.id, move_before_id: issue2.id)
 
         described_class.new(project, user, params).execute(issue)
 

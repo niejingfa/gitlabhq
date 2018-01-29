@@ -1,32 +1,42 @@
 <script>
-/**
- * Renders the Monitoring (Metrics) link in environments table.
- */
-export default {
-  props: {
-    monitoringUrl: {
-      type: String,
-      required: true,
-    },
-  },
+  /**
+  * Renders the Monitoring (Metrics) link in environments table.
+  */
+  import tooltip from '../../vue_shared/directives/tooltip';
 
-  computed: {
-    title() {
-      return 'Monitoring';
+  export default {
+    directives: {
+      tooltip,
     },
-  },
-};
+
+    props: {
+      monitoringUrl: {
+        type: String,
+        required: true,
+      },
+    },
+
+    computed: {
+      title() {
+        return 'Monitoring';
+      },
+    },
+  };
 </script>
 <template>
   <a
-    class="btn monitoring-url has-tooltip hidden-xs hidden-sm"
+    v-tooltip
+    class="btn monitoring-url hidden-xs hidden-sm"
     data-container="body"
     rel="noopener noreferrer nofollow"
     :href="monitoringUrl"
     :title="title"
-    :aria-label="title">
+    :aria-label="title"
+  >
     <i
       class="fa fa-area-chart"
-      aria-hidden="true" />
+      aria-hidden="true"
+    >
+    </i>
   </a>
 </template>

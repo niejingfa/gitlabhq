@@ -16,7 +16,7 @@ class GitlabUploader < CarrierWave::Uploader::Base
   def self.base_dir
     return root_dir unless file_storage?
 
-    File.join(root_dir, 'system')
+    File.join(root_dir, '-', 'system')
   end
 
   def self.file_storage?
@@ -51,7 +51,7 @@ class GitlabUploader < CarrierWave::Uploader::Base
   end
 
   def exists?
-    file.try(:exists?)
+    file.present?
   end
 
   # Override this if you don't want to save files by default to the Rails.root directory

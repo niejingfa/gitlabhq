@@ -1,5 +1,143 @@
 module API
   class Services < Grape::API
+    chat_notification_settings = [
+      {
+        required: true,
+        name: :webhook,
+        type: String,
+        desc: 'The chat webhook'
+      },
+      {
+        required: false,
+        name: :username,
+        type: String,
+        desc: 'The chat username'
+      },
+      {
+        required: false,
+        name: :channel,
+        type: String,
+        desc: 'The default chat channel'
+      }
+    ]
+
+    chat_notification_flags = [
+      {
+        required: false,
+        name: :notify_only_broken_pipelines,
+        type: Boolean,
+        desc: 'Send notifications for broken pipelines'
+      },
+      {
+        required: false,
+        name: :notify_only_default_branch,
+        type: Boolean,
+        desc: 'Send notifications only for the default branch'
+      }
+    ]
+
+    chat_notification_channels = [
+      {
+        required: false,
+        name: :push_channel,
+        type: String,
+        desc: 'The name of the channel to receive push_events notifications'
+      },
+      {
+        required: false,
+        name: :issue_channel,
+        type: String,
+        desc: 'The name of the channel to receive issues_events notifications'
+      },
+      {
+        required: false,
+        name: :confidential_issue_channel,
+        type: String,
+        desc: 'The name of the channel to receive confidential_issues_events notifications'
+      },
+      {
+        required: false,
+        name: :merge_request_channel,
+        type: String,
+        desc: 'The name of the channel to receive merge_requests_events notifications'
+      },
+      {
+        required: false,
+        name: :note_channel,
+        type: String,
+        desc: 'The name of the channel to receive note_events notifications'
+      },
+      {
+        required: false,
+        name: :tag_push_channel,
+        type: String,
+        desc: 'The name of the channel to receive tag_push_events notifications'
+      },
+      {
+        required: false,
+        name: :pipeline_channel,
+        type: String,
+        desc: 'The name of the channel to receive pipeline_events notifications'
+      },
+      {
+        required: false,
+        name: :wiki_page_channel,
+        type: String,
+        desc: 'The name of the channel to receive wiki_page_events notifications'
+      }
+    ]
+
+    chat_notification_events = [
+      {
+        required: false,
+        name: :push_events,
+        type: Boolean,
+        desc: 'Enable notifications for push_events'
+      },
+      {
+        required: false,
+        name: :issues_events,
+        type: Boolean,
+        desc: 'Enable notifications for issues_events'
+      },
+      {
+        required: false,
+        name: :confidential_issues_events,
+        type: Boolean,
+        desc: 'Enable notifications for confidential_issues_events'
+      },
+      {
+        required: false,
+        name: :merge_requests_events,
+        type: Boolean,
+        desc: 'Enable notifications for merge_requests_events'
+      },
+      {
+        required: false,
+        name: :note_events,
+        type: Boolean,
+        desc: 'Enable notifications for note_events'
+      },
+      {
+        required: false,
+        name: :tag_push_events,
+        type: Boolean,
+        desc: 'Enable notifications for tag_push_events'
+      },
+      {
+        required: false,
+        name: :pipeline_events,
+        type: Boolean,
+        desc: 'Enable notifications for pipeline_events'
+      },
+      {
+        required: false,
+        name: :wiki_page_events,
+        type: Boolean,
+        desc: 'Enable notifications for wiki_page_events'
+      }
+    ]
+
     services = {
       'asana' => [
         {
@@ -314,18 +452,12 @@ module API
         },
         {
           required: true,
-          name: :project_key,
-          type: String,
-          desc: 'The short identifier for your JIRA project, all uppercase, e.g., PROJ'
-        },
-        {
-          required: false,
           name: :username,
           type: String,
           desc: 'The username of the user created to be used with GitLab/JIRA'
         },
         {
-          required: false,
+          required: true,
           name: :password,
           type: String,
           desc: 'The password of the user created to be used with GitLab/JIRA'
@@ -378,6 +510,26 @@ module API
           name: :token,
           type: String,
           desc: 'The Slack token'
+        }
+      ],
+      'packagist' => [
+        {
+          required: true,
+          name: :username,
+          type: String,
+          desc: 'The username'
+        },
+        {
+          required: true,
+          name: :token,
+          type: String,
+          desc: 'The Packagist API token'
+        },
+        {
+          required: false,
+          name: :server,
+          type: String,
+          desc: 'The server'
         }
       ],
       'pipelines-email' => [
@@ -475,25 +627,11 @@ module API
         }
       ],
       'slack' => [
-        {
-          required: true,
-          name: :webhook,
-          type: String,
-          desc: 'The Slack webhook. e.g. https://hooks.slack.com/services/...'
-        },
-        {
-          required: false,
-          name: :new_issue_url,
-          type: String,
-          desc: 'The user name'
-        },
-        {
-          required: false,
-          name: :channel,
-          type: String,
-          desc: 'The channel name'
-        }
-      ],
+        chat_notification_settings,
+        chat_notification_flags,
+        chat_notification_channels,
+        chat_notification_events
+      ].flatten,
       'microsoft-teams' => [
         {
           required: true,
@@ -503,13 +641,11 @@ module API
         }
       ],
       'mattermost' => [
-        {
-          required: true,
-          name: :webhook,
-          type: String,
-          desc: 'The Mattermost webhook. e.g. http://mattermost_host/hooks/...'
-        }
-      ],
+        chat_notification_settings,
+        chat_notification_flags,
+        chat_notification_channels,
+        chat_notification_events
+      ].flatten,
       'teamcity' => [
         {
           required: true,
@@ -557,6 +693,7 @@ module API
       KubernetesService,
       MattermostSlashCommandsService,
       SlackSlashCommandsService,
+      PackagistService,
       PipelinesEmailService,
       PivotaltrackerService,
       PrometheusService,
@@ -607,7 +744,7 @@ module API
     params do
       requires :id, type: String, desc: 'The ID of a project'
     end
-    resource :projects, requirements: { id: %r{[^/]+} } do
+    resource :projects, requirements: API::PROJECT_ENDPOINT_REQUIREMENTS  do
       before { authenticate! }
       before { authorize_admin_project }
 
@@ -648,7 +785,7 @@ module API
           service_params = declared_params(include_missing: false).merge(active: true)
 
           if service.update_attributes(service_params)
-            present service, with: Entities::ProjectService, include_passwords: current_user.admin?
+            present service, with: Entities::ProjectService
           else
             render_api_error!('400 Bad Request', 400)
           end
@@ -662,12 +799,14 @@ module API
       delete ":id/services/:service_slug" do
         service = user_project.find_or_initialize_service(params[:service_slug].underscore)
 
-        attrs = service_attributes(service).inject({}) do |hash, key|
-          hash.merge!(key => nil)
-        end
+        destroy_conditionally!(service) do
+          attrs = service_attributes(service).inject({}) do |hash, key|
+            hash.merge!(key => nil)
+          end
 
-        unless service.update_attributes(attrs.merge(active: false))
-          render_api_error!('400 Bad Request', 400)
+          unless service.update_attributes(attrs.merge(active: false))
+            render_api_error!('400 Bad Request', 400)
+          end
         end
       end
 
@@ -685,7 +824,7 @@ module API
 
     trigger_services.each do |service_slug, settings|
       helpers do
-        def chat_command_service(project, service_slug, params)
+        def slash_command_service(project, service_slug, params)
           project.services.active.where(template: false).find do |service|
             service.try(:token) == params[:token] && service.to_param == service_slug.underscore
           end
@@ -695,7 +834,7 @@ module API
       params do
         requires :id, type: String, desc: 'The ID of a project'
       end
-      resource :projects, requirements: { id: %r{[^/]+} } do
+      resource :projects, requirements: API::PROJECT_ENDPOINT_REQUIREMENTS  do
         desc "Trigger a slash command for #{service_slug}" do
           detail 'Added in GitLab 8.13'
         end
@@ -710,7 +849,7 @@ module API
           # This is not accurate, but done to prevent leakage of the project names
           not_found!('Service') unless project
 
-          service = chat_command_service(project, service_slug, params)
+          service = slash_command_service(project, service_slug, params)
           result = service.try(:trigger, params)
 
           if result

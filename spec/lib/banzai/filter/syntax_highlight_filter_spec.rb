@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-describe Banzai::Filter::SyntaxHighlightFilter, lib: true do
+describe Banzai::Filter::SyntaxHighlightFilter do
   include FilterSpecHelper
 
   context "when no language is specified" do
@@ -31,7 +31,7 @@ describe Banzai::Filter::SyntaxHighlightFilter, lib: true do
 
     it "highlights as plaintext" do
       result = filter('<pre><code lang="ruby">This is a test</code></pre>')
-      expect(result.to_html).to eq('<pre class="code highlight" lang="" v-pre="true"><code>This is a test</code></pre>')
+      expect(result.to_html).to eq('<pre class="code highlight js-syntax-highlight" lang="" v-pre="true"><code>This is a test</code></pre>')
     end
   end
 end

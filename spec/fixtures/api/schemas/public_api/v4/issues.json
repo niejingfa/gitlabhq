@@ -9,6 +9,8 @@
       "title": { "type": "string" },
       "description": { "type": ["string", "null"] },
       "state": { "type": "string" },
+      "discussion_locked": { "type": ["boolean", "null"] },
+      "closed_at": { "type": "date" },
       "created_at": { "type": "date" },
       "updated_at": { "type": "date" },
       "labels": {
@@ -22,7 +24,8 @@
         "properties": {
           "id": { "type": "integer" },
           "iid": { "type": "integer" },
-          "project_id": { "type": "integer" },
+          "project_id": { "type": ["integer", "null"] },
+          "group_id": { "type": ["integer", "null"] },
           "title": { "type": "string" },
           "description": { "type": ["string", "null"] },
           "state": { "type": "string" },
@@ -77,7 +80,13 @@
       "downvotes": { "type": "integer" },
       "due_date": { "type": ["date", "null"] },
       "confidential": { "type": "boolean" },
-      "web_url": { "type": "uri" }
+      "web_url": { "type": "uri" },
+      "time_stats": {
+        "time_estimate": { "type": "integer" },
+        "total_time_spent": { "type": "integer" },
+        "human_time_estimate": { "type": ["string", "null"] },
+        "human_total_time_spent": { "type": ["string", "null"] }
+      }
     },
     "required": [
       "id", "iid", "project_id", "title", "description",

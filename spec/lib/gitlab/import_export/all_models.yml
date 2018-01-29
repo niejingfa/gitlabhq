@@ -22,6 +22,7 @@ events:
 - author
 - project
 - target
+- push_event_payload
 notes:
 - award_emoji
 - project
@@ -45,6 +46,7 @@ label:
 - merge_requests
 - priorities
 milestone:
+- group
 - project
 - issues
 - labels
@@ -86,8 +88,15 @@ merge_requests:
 - metrics
 - timelogs
 - head_pipeline
+- latest_merge_request_diff
 merge_request_diff:
 - merge_request
+- merge_request_diff_commits
+- merge_request_diff_files
+merge_request_diff_commits:
+- merge_request_diff
+merge_request_diff_files:
+- merge_request_diff
 pipelines:
 - project
 - user
@@ -95,6 +104,7 @@ pipelines:
 - statuses
 - builds
 - trigger_requests
+- variables
 - auto_canceled_by
 - auto_canceled_pipelines
 - auto_canceled_jobs
@@ -105,6 +115,8 @@ pipelines:
 - artifacts
 - pipeline_schedule
 - merge_requests
+pipeline_variables:
+- pipeline
 stages:
 - project
 - pipeline
@@ -127,8 +139,11 @@ pipeline_schedules:
 - owner
 - pipelines
 - last_pipeline
+- variables
 pipeline_schedule:
 - pipelines
+pipeline_schedule_variables:
+- pipeline_schedule
 deploy_keys:
 - user
 - deploy_keys_projects
@@ -163,6 +178,9 @@ project:
 - tag_taggings
 - tags
 - chat_services
+- cluster
+- clusters
+- cluster_project
 - creator
 - group
 - namespace
@@ -176,6 +194,7 @@ project:
 - mattermost_slash_commands_service
 - slack_slash_commands_service
 - irker_service
+- packagist_service
 - pivotaltracker_service
 - prometheus_service
 - hipchat_service
@@ -242,6 +261,7 @@ project:
 - environments
 - deployments
 - project_feature
+- auto_devops
 - pages_domains
 - authorized_users
 - project_authorizations
@@ -250,6 +270,12 @@ project:
 - statistics
 - container_repositories
 - uploads
+- members_and_requesters
+- build_trace_section_names
+- root_of_fork_network
+- fork_network_member
+- fork_network
+- custom_attributes
 award_emoji:
 - awardable
 - user
@@ -259,3 +285,8 @@ timelogs:
 - issue
 - merge_request
 - user
+push_event_payload:
+- event
+issue_assignees:
+- issue
+- assignee

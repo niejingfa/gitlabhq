@@ -1,13 +1,12 @@
 require 'spec_helper'
 
 describe 'Commits' do
-  include CiStatusHelper
-
   let(:project) { create(:project, :repository) }
+  let(:user) { create(:user) }
 
   describe 'CI' do
     before do
-      login_as :user
+      sign_in(user)
       stub_ci_pipeline_to_return_yaml_file
     end
 
@@ -27,12 +26,12 @@ describe 'Commits' do
       let!(:status) { create(:generic_commit_status, pipeline: pipeline) }
 
       before do
-        project.team << [@user, :reporter]
+        project.add_reporter(user)
       end
 
       describe 'Commit builds' do
         before do
-          visit ci_status_path(pipeline)
+          visit pipeline_path(pipeline)
         end
 
         it { expect(page).to have_content pipeline.sha[0..7] }
@@ -52,7 +51,7 @@ describe 'Commits' do
 
       context 'when logged as developer' do
         before do
-          project.team << [@user, :developer]
+          project.add_developer(user)
         end
 
         describe 'Project commits' do
@@ -65,7 +64,7 @@ describe 'Commits' do
           end
 
           before do
-            visit namespace_project_commits_path(project.namespace, project, :master)
+            visit project_commits_path(project, :master)
           end
 
           it 'shows correct build status from default branch' do
@@ -76,9 +75,9 @@ describe 'Commits' do
           end
         end
 
-        describe 'Commit builds', :feature, :js do
+        describe 'Commit builds', :js do
           before do
-            visit ci_status_path(pipeline)
+            visit pipeline_path(pipeline)
           end
 
           it 'shows pipeline`s data' do
@@ -90,11 +89,11 @@ describe 'Commits' do
 
         context 'Download artifacts' do
           before do
-            build.update_attributes(artifacts_file: artifacts_file)
+            build.update_attributes(legacy_artifacts_file: artifacts_file)
           end
 
           it do
-            visit ci_status_path(pipeline)
+            visit pipeline_path(pipeline)
             click_on 'Download artifacts'
             expect(page.response_headers['Content-Type']).to eq(artifacts_file.content_type)
           end
@@ -102,7 +101,7 @@ describe 'Commits' do
 
         describe 'Cancel all builds' do
           it 'cancels commit', :js do
-            visit ci_status_path(pipeline)
+            visit pipeline_path(pipeline)
             click_on 'Cancel running'
             expect(page).to have_content 'canceled'
           end
@@ -110,7 +109,7 @@ describe 'Commits' do
 
         describe 'Cancel build' do
           it 'cancels build', :js do
-            visit ci_status_path(pipeline)
+            visit pipeline_path(pipeline)
             find('.js-btn-cancel-pipeline').click
             expect(page).to have_content 'canceled'
           end
@@ -119,13 +118,13 @@ describe 'Commits' do
         describe '.gitlab-ci.yml not found warning' do
           context 'ci builds enabled' do
             it "does not show warning" do
-              visit ci_status_path(pipeline)
+              visit pipeline_path(pipeline)
               expect(page).not_to have_content '.gitlab-ci.yml not found in this commit'
             end
 
             it 'shows warning' do
               stub_ci_pipeline_yaml_file(nil)
-              visit ci_status_path(pipeline)
+              visit pipeline_path(pipeline)
               expect(page).to have_content '.gitlab-ci.yml not found in this commit'
             end
           end
@@ -134,7 +133,7 @@ describe 'Commits' do
             before do
               stub_ci_builds_disabled
               stub_ci_pipeline_yaml_file(nil)
-              visit ci_status_path(pipeline)
+              visit pipeline_path(pipeline)
             end
 
             it 'does not show warning' do
@@ -146,12 +145,12 @@ describe 'Commits' do
 
       context "when logged as reporter" do
         before do
-          project.team << [@user, :reporter]
-          build.update_attributes(artifacts_file: artifacts_file)
-          visit ci_status_path(pipeline)
+          project.add_reporter(user)
+          build.update_attributes(legacy_artifacts_file: artifacts_file)
+          visit pipeline_path(pipeline)
         end
 
-        it 'Renders header', :feature, :js do
+        it 'Renders header', :js do
           expect(page).to have_content pipeline.sha[0..7]
           expect(page).to have_content pipeline.git_commit_message
           expect(page).to have_content pipeline.user.name
@@ -164,13 +163,13 @@ describe 'Commits' do
         end
       end
 
-      context 'when accessing internal project with disallowed access', :feature, :js do
+      context 'when accessing internal project with disallowed access', :js do
         before do
           project.update(
             visibility_level: Gitlab::VisibilityLevel::INTERNAL,
             public_builds: false)
-          build.update_attributes(artifacts_file: artifacts_file)
-          visit ci_status_path(pipeline)
+          build.update_attributes(legacy_artifacts_file: artifacts_file)
+          visit pipeline_path(pipeline)
         end
 
         it do
@@ -187,20 +186,26 @@ describe 'Commits' do
 
   context 'viewing commits for a branch' do
     let(:branch_name) { 'master' }
-    let(:user) { create(:user) }
 
     before do
-      project.team << [user, :master]
-      login_with(user)
-      visit namespace_project_commits_path(project.namespace, project, branch_name)
+      project.add_master(user)
+      sign_in(user)
+      visit project_commits_path(project, branch_name)
     end
 
     it 'includes the committed_date for each commit' do
       commits = project.repository.commits(branch_name)
 
       commits.each do |commit|
-        expect(page).to have_content("committed #{commit.committed_date.strftime("%b %d, %Y")}")
+        expect(page).to have_content("authored #{commit.authored_date.strftime("%b %d, %Y")}")
       end
+    end
+
+    it 'shows the ref switcher with the multi-file editor enabled', :js do
+      set_cookie('new_repo', 'true')
+      visit project_commits_path(project, branch_name)
+
+      expect(find('.js-project-refs-dropdown')).to have_content branch_name
     end
   end
 end

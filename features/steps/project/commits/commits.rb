@@ -33,7 +33,7 @@ class Spinach::Features::ProjectCommits < Spinach::FeatureSteps
   end
 
   step 'I click on commit link' do
-    visit namespace_project_commit_path(@project.namespace, @project, sample_commit.id)
+    visit project_commit_path(@project, sample_commit.id)
   end
 
   step 'I see commit info' do
@@ -62,7 +62,7 @@ class Spinach::Features::ProjectCommits < Spinach::FeatureSteps
   end
 
   step 'I should see additional file lines' do
-    page.within @diff.parent do
+    page.within @diff.query_scope do
       expect(first('.new_line').text).not_to have_content "..."
     end
   end
@@ -73,7 +73,7 @@ class Spinach::Features::ProjectCommits < Spinach::FeatureSteps
   end
 
   step 'I visit commits list page for feature branch' do
-    visit namespace_project_commits_path(@project.namespace, @project, 'feature', { limit: 5 })
+    visit project_commits_path(@project, 'feature', { limit: 5 })
   end
 
   step 'I see feature branch commits' do
@@ -119,7 +119,7 @@ class Spinach::Features::ProjectCommits < Spinach::FeatureSteps
 
   step 'I should see button to the merge request' do
     merge_request = MergeRequest.find_by(title: 'Feature')
-    expect(page).to have_link "View open merge request", href: namespace_project_merge_request_path(@project.namespace, @project, merge_request)
+    expect(page).to have_link "View open merge request", href: project_merge_request_path(@project, merge_request)
   end
 
   step 'I see breadcrumb links' do
@@ -135,11 +135,11 @@ class Spinach::Features::ProjectCommits < Spinach::FeatureSteps
   end
 
   step 'I visit a commit with an image that changed' do
-    visit namespace_project_commit_path(@project.namespace, @project, sample_image_commit.id)
+    visit project_commit_path(@project, sample_image_commit.id)
   end
 
   step 'The diff links to both the previous and current image' do
-    links = page.all('.two-up span div a')
+    links = page.all('.file-actions a')
     expect(links[0]['href']).to match %r{blob/#{sample_image_commit.old_blob_id}}
     expect(links[1]['href']).to match %r{blob/#{sample_image_commit.new_blob_id}}
   end
@@ -180,11 +180,13 @@ class Spinach::Features::ProjectCommits < Spinach::FeatureSteps
     dropdown.find(".compare-dropdown-toggle").click
     dropdown.find('.dropdown-menu', visible: true)
     dropdown.fill_in("Filter by Git revision", with: selection)
+
     if is_commit
       dropdown.find('input[type="search"]').send_keys(:return)
     else
       find_link(selection, visible: true).click
     end
+
     dropdown.find('.dropdown-menu', visible: false)
   end
 end

@@ -1,39 +1,46 @@
 <script>
-/**
- * Renders a terminal button to open a web terminal.
- * Used in environments table.
- */
-import terminalIconSvg from 'icons/_icon_terminal.svg';
+  /**
+  * Renders a terminal button to open a web terminal.
+  * Used in environments table.
+  */
+  import terminalIconSvg from 'icons/_icon_terminal.svg';
+  import tooltip from '../../vue_shared/directives/tooltip';
 
-export default {
-  props: {
-    terminalPath: {
-      type: String,
-      required: false,
-      default: '',
+  export default {
+    directives: {
+      tooltip,
     },
-  },
 
-  data() {
-    return {
-      terminalIconSvg,
-    };
-  },
-
-  computed: {
-    title() {
-      return 'Terminal';
+    props: {
+      terminalPath: {
+        type: String,
+        required: false,
+        default: '',
+      },
     },
-  },
-};
+
+    data() {
+      return {
+        terminalIconSvg,
+      };
+    },
+
+    computed: {
+      title() {
+        return 'Terminal';
+      },
+    },
+  };
 </script>
 <template>
   <a
-    class="btn terminal-button has-tooltip hidden-xs hidden-sm"
+    v-tooltip
+    class="btn terminal-button hidden-xs hidden-sm"
     data-container="body"
     :title="title"
     :aria-label="title"
     :href="terminalPath"
-    v-html="terminalIconSvg">
+    v-html="terminalIconSvg"
+  >
   </a>
 </template>

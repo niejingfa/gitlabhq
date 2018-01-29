@@ -11,12 +11,14 @@ module API
       end
       resource :projects, requirements: { id: %r{[^/]+} } do
         desc 'Get a project repository branches' do
-          success ::API::Entities::RepoBranch
+          success ::API::Entities::Branch
         end
         get ":id/repository/branches" do
-          branches = user_project.repository.branches.sort_by(&:name)
+          repository = user_project.repository
+          branches = repository.branches.sort_by(&:name)
+          merged_branch_names = repository.merged_branch_names(branches.map(&:name))
 
-          present branches, with: ::API::Entities::RepoBranch, project: user_project
+          present branches, with: ::API::Entities::Branch, project: user_project, merged_branch_names: merged_branch_names
         end
 
         desc 'Delete a branch'
@@ -26,8 +28,8 @@ module API
         delete ":id/repository/branches/:branch", requirements: { branch: /.+/ } do
           authorize_push_project
 
-          result = DeleteBranchService.new(user_project, current_user).
-                   execute(params[:branch])
+          result = DeleteBranchService.new(user_project, current_user)
+                   .execute(params[:branch])
 
           if result[:status] == :success
             status(200)
@@ -47,7 +49,7 @@ module API
         end
 
         desc 'Create branch' do
-          success ::API::Entities::RepoBranch
+          success ::API::Entities::Branch
         end
         params do
           requires :branch_name, type: String, desc: 'The name of the branch'
@@ -55,12 +57,12 @@ module API
         end
         post ":id/repository/branches" do
           authorize_push_project
-          result = CreateBranchService.new(user_project, current_user).
-            execute(params[:branch_name], params[:ref])
+          result = CreateBranchService.new(user_project, current_user)
+            .execute(params[:branch_name], params[:ref])
 
           if result[:status] == :success
             present result[:branch],
-              with: ::API::Entities::RepoBranch,
+              with: ::API::Entities::Branch,
               project: user_project
           else
             render_api_error!(result[:message], 400)

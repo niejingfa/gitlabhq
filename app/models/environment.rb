@@ -6,7 +6,8 @@ class Environment < ActiveRecord::Base
 
   belongs_to :project, required: true, validate: true
 
-  has_many :deployments, dependent: :destroy
+  has_many :deployments, dependent: :destroy # rubocop:disable Cop/ActiveRecordDependent
+
   has_one :last_deployment, -> { order('deployments.id DESC') }, class_name: 'Deployment'
 
   before_validation :nullify_external_url
@@ -29,7 +30,6 @@ class Environment < ActiveRecord::Base
                       message: Gitlab::Regex.environment_slug_regex_message }
 
   validates :external_url,
-            uniqueness: { scope: :project_id },
             length: { maximum: 255 },
             allow_nil: true,
             addressable_url: true
@@ -40,11 +40,12 @@ class Environment < ActiveRecord::Base
   scope :stopped, -> { with_state(:stopped) }
   scope :order_by_last_deployed_at, -> do
     max_deployment_id_sql =
-      Deployment.select(Deployment.arel_table[:id].maximum).
-      where(Deployment.arel_table[:environment_id].eq(arel_table[:id])).
-      to_sql
+      Deployment.select(Deployment.arel_table[:id].maximum)
+      .where(Deployment.arel_table[:environment_id].eq(arel_table[:id]))
+      .to_sql
     order(Gitlab::Database.nulls_first_order("(#{max_deployment_id_sql})", 'ASC'))
   end
+  scope :in_review_folder, -> { where(environment_type: "review") }
 
   state_machine :state, initial: :available do
     event :start do
@@ -81,12 +82,7 @@ class Environment < ActiveRecord::Base
   def set_environment_type
     names = name.split('/')
 
-    self.environment_type =
-      if names.many?
-        names.first
-      else
-        nil
-      end
+    self.environment_type = names.many? ? names.first : nil
   end
 
   def includes_commit?(commit)
@@ -100,7 +96,7 @@ class Environment < ActiveRecord::Base
   end
 
   def update_merge_request_metrics?
-    (environment_type || name) == "production"
+    folder_name == "production"
   end
 
   def first_deployment_for(commit)
@@ -113,7 +109,7 @@ class Environment < ActiveRecord::Base
   end
 
   def ref_path
-    "refs/environments/#{Shellwords.shellescape(name)}"
+    "refs/#{Repository::REF_ENVIRONMENTS}/#{slug}"
   end
 
   def formatted_external_url
@@ -142,11 +138,11 @@ class Environment < ActiveRecord::Base
   end
 
   def has_terminals?
-    project.deployment_service.present? && available? && last_deployment.present?
+    project.deployment_platform.present? && available? && last_deployment.present?
   end
 
   def terminals
-    project.deployment_service.terminals(self) if has_terminals?
+    project.deployment_platform.terminals(self) if has_terminals?
   end
 
   def has_metrics?
@@ -155,6 +151,20 @@ class Environment < ActiveRecord::Base
 
   def metrics
     project.monitoring_service.environment_metrics(self) if has_metrics?
+  end
+
+  def has_additional_metrics?
+    project.prometheus_service.present? && available? && last_deployment.present?
+  end
+
+  def additional_metrics
+    if has_additional_metrics?
+      project.prometheus_service.additional_environment_metrics(self)
+    end
+  end
+
+  def slug
+    super.presence || generate_slug
   end
 
   # An environment name is not necessarily suitable for use in URLs, DNS
@@ -207,10 +217,13 @@ class Environment < ActiveRecord::Base
   end
 
   def etag_cache_key
-    Gitlab::Routing.url_helpers.namespace_project_environments_path(
-      project.namespace,
+    Gitlab::Routing.url_helpers.project_environments_path(
       project,
       format: :json)
+  end
+
+  def folder_name
+    self.environment_type || self.name
   end
 
   private

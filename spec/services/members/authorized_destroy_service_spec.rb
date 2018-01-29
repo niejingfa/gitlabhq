@@ -1,10 +1,10 @@
 require 'spec_helper'
 
-describe Members::AuthorizedDestroyService, services: true do
+describe Members::AuthorizedDestroyService do
   let(:member_user) { create(:user) }
-  let(:project) { create(:empty_project, :public) }
+  let(:project) { create(:project, :public) }
   let(:group) { create(:group, :public) }
-  let(:group_project) { create(:empty_project, :public, group: group) }
+  let(:group_project) { create(:project, :public, group: group) }
 
   def number_of_assigned_issuables(user)
     Issue.assigned_to(user).count + MergeRequest.assigned_to(user).count
@@ -13,7 +13,7 @@ describe Members::AuthorizedDestroyService, services: true do
   context 'Invited users' do
     # Regression spec for issue: https://gitlab.com/gitlab-org/gitlab-ce/issues/32504
     it 'destroys invited project member' do
-      project.team << [member_user, :developer]
+      project.add_developer(member_user)
 
       member = create :project_member, :invited, project: project
 
@@ -45,14 +45,14 @@ describe Members::AuthorizedDestroyService, services: true do
       expect { described_class.new(member, member_user).execute }
         .to change { number_of_assigned_issuables(member_user) }.from(4).to(2)
 
-      expect(issue.reload.assignee_id).to be_nil
+      expect(issue.reload.assignee_ids).to be_empty
       expect(merge_request.reload.assignee_id).to be_nil
     end
   end
 
   context 'Project member' do
     it "unassigns issues and merge requests" do
-      project.team << [member_user, :developer]
+      project.add_developer(member_user)
 
       create :issue, project: project, assignees: [member_user]
       create :merge_request, target_project: project, source_project: project, assignee: member_user

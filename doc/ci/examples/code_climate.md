@@ -5,10 +5,10 @@ GitLab CI and Docker.
 
 First, you need GitLab Runner with [docker-in-docker executor][dind].
 
-Once you set up the Runner, add a new job to `.gitlab-ci.yml`, called `codeclimate`:
+Once you set up the Runner, add a new job to `.gitlab-ci.yml`, called `codequality`:
 
 ```yaml
-codeclimate:
+codequality:
   image: docker:latest
   variables:
     DOCKER_DRIVER: overlay
@@ -16,13 +16,13 @@ codeclimate:
     - docker:dind
   script:
     - docker pull codeclimate/codeclimate
-    - docker run --env CODECLIMATE_CODE="$PWD" --volume "$PWD":/code --volume /var/run/docker.sock:/var/run/docker.sock --volume /tmp/cc:/tmp/cc codeclimate/codeclimate init
-    - docker run --env CODECLIMATE_CODE="$PWD" --volume "$PWD":/code --volume /var/run/docker.sock:/var/run/docker.sock --volume /tmp/cc:/tmp/cc codeclimate/codeclimate analyze -f json > codeclimate.json
+    - docker run --env CODECLIMATE_CODE="$PWD" --volume "$PWD":/code --volume /var/run/docker.sock:/var/run/docker.sock --volume /tmp/cc:/tmp/cc codeclimate/codeclimate:0.69.0 init
+    - docker run --env CODECLIMATE_CODE="$PWD" --volume "$PWD":/code --volume /var/run/docker.sock:/var/run/docker.sock --volume /tmp/cc:/tmp/cc codeclimate/codeclimate:0.69.0 analyze -f json > codeclimate.json || true
   artifacts:
     paths: [codeclimate.json]
 ```
 
-This will create a `codeclimate` job in your CI pipeline and will allow you to
+This will create a `codequality` job in your CI pipeline and will allow you to
 download and analyze the report artifact in JSON format.
 
 For GitLab [Enterprise Edition Starter][ee] users, this information can be automatically

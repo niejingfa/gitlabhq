@@ -2,12 +2,16 @@ module API
   class Groups < Grape::API
     include PaginationParams
 
-    before { authenticate! }
+    before { authenticate_non_get! }
 
     helpers do
       params :optional_params_ce do
         optional :description, type: String, desc: 'The description of the group'
-        optional :visibility, type: String, values: Gitlab::VisibilityLevel.string_values, desc: 'The visibility of the group'
+        optional :visibility, type: String,
+                              values: Gitlab::VisibilityLevel.string_values,
+                              default: Gitlab::VisibilityLevel.string_level(
+                                Gitlab::CurrentSettings.current_application_settings.default_group_visibility),
+                              desc: 'The visibility of the group'
         optional :lfs_enabled, type: Boolean, desc: 'Enable/disable LFS for the projects in this group'
         optional :request_access_enabled, type: Boolean, desc: 'Allow users to request member access'
         optional :share_with_group_lock, type: Boolean, desc: 'Prevent sharing a project with another group within this group'
@@ -21,22 +25,7 @@ module API
         optional :statistics, type: Boolean, default: false, desc: 'Include project statistics'
       end
 
-      def present_groups(groups, options = {})
-        options = options.reverse_merge(
-          with: Entities::Group,
-          current_user: current_user
-        )
-
-        groups = groups.with_statistics if options[:statistics]
-        present paginate(groups), options
-      end
-    end
-
-    resource :groups do
-      desc 'Get a groups list' do
-        success Entities::Group
-      end
-      params do
+      params :group_list_params do
         use :statistics_params
         optional :skip_groups, type: Array[Integer], desc: 'Array of group ids to exclude from list'
         optional :all_available, type: Boolean, desc: 'Show all group that you have access to'
@@ -46,22 +35,54 @@ module API
         optional :sort, type: String, values: %w[asc desc], default: 'asc', desc: 'Sort by asc (ascending) or desc (descending)'
         use :pagination
       end
-      get do
-        groups = if params[:owned]
-                   current_user.owned_groups
-                 elsif current_user.admin
-                   Group.all
-                 elsif params[:all_available]
-                   GroupsFinder.new(current_user).execute
-                 else
-                   current_user.groups
-                 end
 
+      def find_groups(params)
+        find_params = {
+          all_available: params[:all_available],
+          custom_attributes: params[:custom_attributes],
+          owned: params[:owned]
+        }
+        find_params[:parent] = find_group!(params[:id]) if params[:id]
+
+        groups = GroupsFinder.new(current_user, find_params).execute
         groups = groups.search(params[:search]) if params[:search].present?
         groups = groups.where.not(id: params[:skip_groups]) if params[:skip_groups].present?
         groups = groups.reorder(params[:order_by] => params[:sort])
 
-        present_groups groups, statistics: params[:statistics] && current_user.admin?
+        groups
+      end
+
+      def find_group_projects(params)
+        group = find_group!(params[:id])
+        projects = GroupProjectsFinder.new(group: group, current_user: current_user, params: project_finder_params).execute
+        projects = reorder_projects(projects)
+        paginate(projects)
+      end
+
+      def present_groups(params, groups)
+        options = {
+          with: Entities::Group,
+          current_user: current_user,
+          statistics: params[:statistics] && current_user.admin?
+        }
+
+        groups = groups.with_statistics if options[:statistics]
+        present paginate(groups), options
+      end
+    end
+
+    resource :groups do
+      include CustomAttributesEndpoints
+
+      desc 'Get a groups list' do
+        success Entities::Group
+      end
+      params do
+        use :group_list_params
+      end
+      get do
+        groups = find_groups(params)
+        present_groups params, groups
       end
 
       desc 'Create a group. Available only for users who can create groups.' do
@@ -78,7 +99,12 @@ module API
         use :optional_params
       end
       post do
-        authorize! :create_group
+        parent_group = find_group!(params[:parent_id]) if params[:parent_id].present?
+        if parent_group
+          authorize! :create_subgroup, parent_group
+        else
+          authorize! :create_group
+        end
 
         group = ::Groups::CreateService.new(current_user, declared_params(include_missing: false)).execute
 
@@ -93,7 +119,7 @@ module API
     params do
       requires :id, type: String, desc: 'The ID of a group'
     end
-    resource :groups, requirements: { id: %r{[^/]+} } do
+    resource :groups, requirements: API::PROJECT_ENDPOINT_REQUIREMENTS do
       desc 'Update a group. Available only for users who can administrate groups.' do
         success Entities::Group
       end
@@ -125,7 +151,10 @@ module API
       delete ":id" do
         group = find_group!(params[:id])
         authorize! :admin_group, group
-        ::Groups::DestroyService.new(group, current_user).execute
+
+        destroy_conditionally!(group) do |group|
+          ::Groups::DestroyService.new(group, current_user).execute
+        end
       end
 
       desc 'Get a list of projects in this group.' do
@@ -148,11 +177,21 @@ module API
         use :pagination
       end
       get ":id/projects" do
-        group = find_group!(params[:id])
-        projects = GroupProjectsFinder.new(group: group, current_user: current_user, params: project_finder_params).execute
-        projects = reorder_projects(projects)
+        projects = find_group_projects(params)
         entity = params[:simple] ? Entities::BasicProjectDetails : Entities::Project
-        present paginate(projects), with: entity, current_user: current_user
+
+        present entity.prepare_relation(projects), with: entity, current_user: current_user
+      end
+
+      desc 'Get a list of subgroups in this group.' do
+        success Entities::Group
+      end
+      params do
+        use :group_list_params
+      end
+      get ":id/subgroups" do
+        groups = find_groups(params)
+        present_groups params, groups
       end
 
       desc 'Transfer a project to the group namespace. Available only for admin.' do

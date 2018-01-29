@@ -6,7 +6,7 @@ class Projects::DeployKeysController < Projects::ApplicationController
   before_action :authorize_admin_project!
   before_action :authorize_update_deploy_key!, only: [:edit, :update]
 
-  layout "project_settings"
+  layout 'project_settings'
 
   def index
     respond_to do |format|
@@ -22,11 +22,12 @@ class Projects::DeployKeysController < Projects::ApplicationController
   end
 
   def create
-    @key = DeployKey.new(create_params.merge(user: current_user))
+    @key = DeployKeys::CreateService.new(current_user, create_params).execute
 
-    unless @key.valid? && @project.deploy_keys << @key
+    unless @key.valid?
       flash[:alert] = @key.errors.full_messages.join(', ').html_safe
     end
+
     redirect_to_repository_settings(@project)
   end
 
@@ -66,15 +67,18 @@ class Projects::DeployKeysController < Projects::ApplicationController
   protected
 
   def deploy_key
-    @deploy_key ||= @project.deploy_keys.find(params[:id])
+    @deploy_key ||= DeployKey.find(params[:id])
   end
 
   def create_params
-    params.require(:deploy_key).permit(:key, :title, :can_push)
+    create_params = params.require(:deploy_key)
+                          .permit(:key, :title, deploy_keys_projects_attributes: [:can_push])
+    create_params.dig(:deploy_keys_projects_attributes, '0')&.merge!(project_id: @project.id)
+    create_params
   end
 
   def update_params
-    params.require(:deploy_key).permit(:title, :can_push)
+    params.require(:deploy_key).permit(:title, deploy_keys_projects_attributes: [:id, :can_push])
   end
 
   def authorize_update_deploy_key!

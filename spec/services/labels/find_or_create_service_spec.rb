@@ -1,9 +1,9 @@
 require 'spec_helper'
 
-describe Labels::FindOrCreateService, services: true do
+describe Labels::FindOrCreateService do
   describe '#execute' do
     let(:group)   { create(:group) }
-    let(:project) { create(:empty_project, namespace: group) }
+    let(:project) { create(:project, namespace: group) }
 
     let(:params) do
       {
@@ -17,7 +17,7 @@ describe Labels::FindOrCreateService, services: true do
       let(:user) { create(:user) }
       subject(:service) { described_class.new(user, project, params) }
       before do
-        project.team << [user, :developer]
+        project.add_developer(user)
       end
 
       context 'when label does not exist at group level' do

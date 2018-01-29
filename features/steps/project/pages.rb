@@ -15,7 +15,7 @@ class Spinach::Features::ProjectPages < Spinach::FeatureSteps
   end
 
   step 'I visit the Project Pages' do
-    visit namespace_project_pages_path(@project.namespace, @project)
+    visit project_pages_path(@project)
   end
 
   step 'I should see the usage of GitLab Pages' do
@@ -23,26 +23,31 @@ class Spinach::Features::ProjectPages < Spinach::FeatureSteps
   end
 
   step 'I should see the "Pages" tab' do
-    page.within '.sub-nav' do
+    page.within '.nav-sidebar' do
       expect(page).to have_link('Pages')
     end
   end
 
   step 'I should not see the "Pages" tab' do
-    page.within '.sub-nav' do
+    page.within '.nav-sidebar' do
       expect(page).not_to have_link('Pages')
     end
   end
 
   step 'pages are deployed' do
-    pipeline = @project.pipelines.create(ref: 'HEAD', sha: @project.commit('HEAD').sha)
+    pipeline = @project.pipelines.create(ref: 'HEAD',
+                                         sha: @project.commit('HEAD').sha,
+                                         source: :push,
+                                         protected: false)
+
     build = build(:ci_build,
                   project: @project,
                   pipeline: pipeline,
                   ref: 'HEAD',
-                  artifacts_file: fixture_file_upload(Rails.root + 'spec/fixtures/pages.zip'),
-                  artifacts_metadata: fixture_file_upload(Rails.root + 'spec/fixtures/pages.zip.meta')
+                  legacy_artifacts_file: fixture_file_upload(Rails.root + 'spec/fixtures/pages.zip'),
+                  legacy_artifacts_metadata: fixture_file_upload(Rails.root + 'spec/fixtures/pages.zip.meta')
                  )
+
     result = ::Projects::UpdatePagesService.new(@project, build).execute
     expect(result[:status]).to eq(:success)
   end
@@ -75,7 +80,7 @@ class Spinach::Features::ProjectPages < Spinach::FeatureSteps
   end
 
   step 'I visit add a new Pages Domain' do
-    visit new_namespace_project_pages_domain_path(@project.namespace, @project)
+    visit new_project_pages_domain_path(@project)
   end
 
   step 'I fill the domain' do

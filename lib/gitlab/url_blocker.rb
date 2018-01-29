@@ -19,11 +19,15 @@ module Gitlab
           return false if internal?(uri)
 
           return true if blocked_port?(uri.port)
+          return true if blocked_user_or_hostname?(uri.user)
+          return true if blocked_user_or_hostname?(uri.hostname)
 
-          server_ips = Resolv.getaddresses(uri.hostname)
+          server_ips = Addrinfo.getaddrinfo(uri.hostname, 80, nil, :STREAM).map(&:ip_address)
           return true if (blocked_ips & server_ips).any?
         rescue Addressable::URI::InvalidURIError
           return true
+        rescue SocketError
+          return false
         end
 
         false
@@ -35,6 +39,12 @@ module Gitlab
         return false if port.blank?
 
         port < 1024 && !VALID_PORTS.include?(port)
+      end
+
+      def blocked_user_or_hostname?(value)
+        return false if value.blank?
+
+        value !~ /\A\p{Alnum}/
       end
 
       def internal?(uri)

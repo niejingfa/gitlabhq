@@ -12,6 +12,7 @@ class Projects::DeploymentsController < Projects::ApplicationController
 
   def metrics
     return render_404 unless deployment.has_metrics?
+
     @metrics = deployment.metrics
     if @metrics&.any?
       render json: @metrics, status: :ok
@@ -20,6 +21,22 @@ class Projects::DeploymentsController < Projects::ApplicationController
     end
   rescue NotImplementedError
     render_404
+  end
+
+  def additional_metrics
+    return render_404 unless deployment.has_additional_metrics?
+
+    respond_to do |format|
+      format.json do
+        metrics = deployment.additional_metrics
+
+        if metrics.any?
+          render json: metrics
+        else
+          head :no_content
+        end
+      end
+    end
   end
 
   private

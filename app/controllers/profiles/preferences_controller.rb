@@ -6,7 +6,9 @@ class Profiles::PreferencesController < Profiles::ApplicationController
 
   def update
     begin
-      if @user.update_attributes(preferences_params)
+      result = Users::UpdateService.new(current_user, preferences_params.merge(user: user)).execute
+
+      if result[:status] == :success
         flash[:notice] = 'Preferences saved.'
       else
         flash[:alert] = 'Failed to save preferences.'
@@ -33,7 +35,8 @@ class Profiles::PreferencesController < Profiles::ApplicationController
       :color_scheme_id,
       :layout,
       :dashboard,
-      :project_view
+      :project_view,
+      :theme_id
     )
   end
 end

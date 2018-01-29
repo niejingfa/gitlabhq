@@ -1,12 +1,12 @@
 require 'spec_helper'
 
-describe Members::CreateService, services: true do
-  let(:project) { create(:empty_project) }
+describe Members::CreateService do
+  let(:project) { create(:project) }
   let(:user) { create(:user) }
   let(:project_user) { create(:user) }
 
   before do
-    project.team << [user, :master]
+    project.add_master(user)
   end
 
   it 'adds user to members' do

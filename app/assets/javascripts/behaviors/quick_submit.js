@@ -1,4 +1,5 @@
 import '../commons/bootstrap';
+import { isInIssuePage } from '../lib/utils/common_utils';
 
 // Quick Submit behavior
 //
@@ -40,11 +41,14 @@ $(document).on('keydown.quick_submit', '.js-quick-submit', (e) => {
 
   e.preventDefault();
   const $form = $(e.target).closest('form');
-  const $submitButton = $form.find('input[type=submit], button[type=submit]');
+  const $submitButton = $form.find('input[type=submit], button[type=submit]').first();
 
   if (!$submitButton.attr('disabled')) {
     $submitButton.trigger('click', [e]);
-    $submitButton.disable();
+
+    if (!isInIssuePage()) {
+      $submitButton.disable();
+    }
   }
 });
 

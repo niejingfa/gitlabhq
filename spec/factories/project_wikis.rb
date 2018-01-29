@@ -1,8 +1,8 @@
-FactoryGirl.define do
+FactoryBot.define do
   factory :project_wiki do
     skip_create
 
-    project factory: :empty_project
+    project
     user factory: :user
     initialize_with { new(project, user) }
   end

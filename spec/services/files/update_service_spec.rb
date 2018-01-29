@@ -24,7 +24,7 @@ describe Files::UpdateService do
   end
 
   before do
-    project.team << [user, :master]
+    project.add_master(user)
   end
 
   describe "#execute" do
@@ -32,8 +32,8 @@ describe Files::UpdateService do
       let(:last_commit_sha) { "foo" }
 
       it "returns a hash with the correct error message and a :error status " do
-        expect { subject.execute }.
-          to raise_error(Files::UpdateService::FileChangedError,
+        expect { subject.execute }
+          .to raise_error(Files::UpdateService::FileChangedError,
                          "You are attempting to update a file that has changed since you started editing it.")
       end
     end
@@ -72,13 +72,15 @@ describe Files::UpdateService do
       end
     end
 
-    context 'when target branch is different than source branch' do
-      let(:branch_name) { "#{project.default_branch}-new" }
+    context 'with gitaly disabled', :skip_gitaly_mock do
+      context 'when target branch is different than source branch' do
+        let(:branch_name) { "#{project.default_branch}-new" }
 
-      it 'fires hooks only once' do
-        expect(GitHooksService).to receive(:new).once.and_call_original
+        it 'fires hooks only once' do
+          expect(Gitlab::Git::HooksService).to receive(:new).once.and_call_original
 
-        subject.execute
+          subject.execute
+        end
       end
     end
   end

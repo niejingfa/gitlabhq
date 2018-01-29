@@ -1,69 +1,65 @@
 <script>
-  import Visibility from 'visibilityjs';
+  import _ from 'underscore';
   import PipelinesService from '../services/pipelines_service';
-  import eventHub from '../event_hub';
-  import pipelinesTableComponent from '../../vue_shared/components/pipelines_table.vue';
+  import pipelinesMixin from '../mixins/pipelines';
   import tablePagination from '../../vue_shared/components/table_pagination.vue';
-  import emptyState from './empty_state.vue';
-  import errorState from './error_state.vue';
-  import navigationTabs from './navigation_tabs.vue';
+  import navigationTabs from '../../vue_shared/components/navigation_tabs.vue';
   import navigationControls from './nav_controls.vue';
-  import loadingIcon from '../../vue_shared/components/loading_icon.vue';
-  import Poll from '../../lib/utils/poll';
+  import {
+    convertPermissionToBoolean,
+    getParameterByName,
+    parseQueryStringIntoObject,
+  } from '../../lib/utils/common_utils';
+  import CIPaginationMixin from '../../vue_shared/mixins/ci_pagination_api_mixin';
 
   export default {
+    components: {
+      tablePagination,
+      navigationTabs,
+      navigationControls,
+    },
+    mixins: [
+      pipelinesMixin,
+      CIPaginationMixin,
+    ],
     props: {
       store: {
         type: Object,
         required: true,
       },
-    },
-    components: {
-      tablePagination,
-      pipelinesTableComponent,
-      emptyState,
-      errorState,
-      navigationTabs,
-      navigationControls,
-      loadingIcon,
+      // Can be rendered in 3 different places, with some visual differences
+      // Accepts root | child
+      // `root` -> main view
+      // `child` -> rendered inside MR or Commit View
+      viewType: {
+        type: String,
+        required: false,
+        default: 'root',
+      },
     },
     data() {
       const pipelinesData = document.querySelector('#pipelines-list-vue').dataset;
 
       return {
         endpoint: pipelinesData.endpoint,
-        cssClass: pipelinesData.cssClass,
         helpPagePath: pipelinesData.helpPagePath,
+        emptyStateSvgPath: pipelinesData.emptyStateSvgPath,
+        errorStateSvgPath: pipelinesData.errorStateSvgPath,
+        autoDevopsPath: pipelinesData.helpAutoDevopsPath,
         newPipelinePath: pipelinesData.newPipelinePath,
         canCreatePipeline: pipelinesData.canCreatePipeline,
-        allPath: pipelinesData.allPath,
-        pendingPath: pipelinesData.pendingPath,
-        runningPath: pipelinesData.runningPath,
-        finishedPath: pipelinesData.finishedPath,
-        branchesPath: pipelinesData.branchesPath,
-        tagsPath: pipelinesData.tagsPath,
         hasCi: pipelinesData.hasCi,
         ciLintPath: pipelinesData.ciLintPath,
+        resetCachePath: pipelinesData.resetCachePath,
         state: this.store.state,
-        apiScope: 'all',
-        pagenum: 1,
-        isLoading: false,
-        hasError: false,
-        isMakingRequest: false,
-        updateGraphDropdown: false,
-        hasMadeRequest: false,
+        scope: getParameterByName('scope') || 'all',
+        page: getParameterByName('page') || '1',
+        requestData: {},
       };
     },
     computed: {
       canCreatePipelineParsed() {
-        return gl.utils.convertPermissionToBoolean(this.canCreatePipeline);
-      },
-      scope() {
-        const scope = gl.utils.getParameterByName('scope');
-        return scope === null ? 'all' : scope;
-      },
-      shouldRenderErrorState() {
-        return this.hasError && !this.isLoading;
+        return convertPermissionToBoolean(this.canCreatePipeline);
       },
 
       /**
@@ -106,120 +102,103 @@
           this.state.pipelines.length &&
           this.state.pageInfo.total > this.state.pageInfo.perPage;
       },
-
       hasCiEnabled() {
         return this.hasCi !== undefined;
       },
-      paths() {
-        return {
-          allPath: this.allPath,
-          pendingPath: this.pendingPath,
-          finishedPath: this.finishedPath,
-          runningPath: this.runningPath,
-          branchesPath: this.branchesPath,
-          tagsPath: this.tagsPath,
-        };
-      },
-      pageParameter() {
-        return gl.utils.getParameterByName('page') || this.pagenum;
-      },
-      scopeParameter() {
-        return gl.utils.getParameterByName('scope') || this.apiScope;
+
+      tabs() {
+        const { count } = this.state;
+        return [
+          {
+            name: 'All',
+            scope: 'all',
+            count: count.all,
+            isActive: this.scope === 'all',
+          },
+          {
+            name: 'Pending',
+            scope: 'pending',
+            count: count.pending,
+            isActive: this.scope === 'pending',
+          },
+          {
+            name: 'Running',
+            scope: 'running',
+            count: count.running,
+            isActive: this.scope === 'running',
+          },
+          {
+            name: 'Finished',
+            scope: 'finished',
+            count: count.finished,
+            isActive: this.scope === 'finished',
+          },
+          {
+            name: 'Branches',
+            scope: 'branches',
+            isActive: this.scope === 'branches',
+          },
+          {
+            name: 'Tags',
+            scope: 'tags',
+            isActive: this.scope === 'tags',
+          },
+        ];
       },
     },
     created() {
       this.service = new PipelinesService(this.endpoint);
-
-      const poll = new Poll({
-        resource: this.service,
-        method: 'getPipelines',
-        data: { page: this.pageParameter, scope: this.scopeParameter },
-        successCallback: this.successCallback,
-        errorCallback: this.errorCallback,
-        notificationCallback: this.setIsMakingRequest,
-      });
-
-      if (!Visibility.hidden()) {
-        this.isLoading = true;
-        poll.makeRequest();
-      } else {
-        // If tab is not visible we need to make the first request so we don't show the empty
-        // state without knowing if there are any pipelines
-        this.fetchPipelines();
-      }
-
-      Visibility.change(() => {
-        if (!Visibility.hidden()) {
-          poll.restart();
-        } else {
-          poll.stop();
-        }
-      });
-
-      eventHub.$on('refreshPipelines', this.fetchPipelines);
-    },
-    beforeDestroy() {
-      eventHub.$off('refreshPipelines');
+      this.requestData = { page: this.page, scope: this.scope };
     },
     methods: {
-      /**
-       * Will change the page number and update the URL.
-       *
-       * @param  {Number} pageNumber desired page to go to.
-       */
-      change(pageNumber) {
-        const param = gl.utils.setParamInURL('page', pageNumber);
-
-        gl.utils.visitUrl(param);
-        return param;
-      },
-
-      fetchPipelines() {
-        if (!this.isMakingRequest) {
-          this.isLoading = true;
-
-          this.service.getPipelines({ scope: this.scopeParameter, page: this.pageParameter })
-            .then(response => this.successCallback(response))
-            .catch(() => this.errorCallback());
-        }
-      },
       successCallback(resp) {
-        const response = {
-          headers: resp.headers,
-          body: resp.json(),
-        };
-
-        this.store.storeCount(response.body.count);
-        this.store.storePipelines(response.body.pipelines);
-        this.store.storePagination(response.headers);
-
-        this.isLoading = false;
-        this.updateGraphDropdown = true;
-        this.hasMadeRequest = true;
+        return resp.json().then((response) => {
+          // Because we are polling & the user is interacting verify if the response received
+          // matches the last request made
+          if (_.isEqual(parseQueryStringIntoObject(resp.url.split('?')[1]), this.requestData)) {
+            this.store.storeCount(response.count);
+            this.store.storePagination(resp.headers);
+            this.setCommonData(response.pipelines);
+          }
+        });
       },
+      /**
+       * Handles URL and query parameter changes.
+       * When the user uses the pagination or the tabs,
+       *  - update URL
+       *  - Make API request to the server with new parameters
+       *  - Update the polling function
+       *  - Update the internal state
+       */
+      updateContent(parameters) {
+        this.updateInternalState(parameters);
 
-      errorCallback() {
-        this.hasError = true;
-        this.isLoading = false;
-        this.updateGraphDropdown = false;
-      },
+        // fetch new data
+        return this.service.getPipelines(this.requestData)
+          .then((response) => {
+            this.isLoading = false;
+            this.successCallback(response);
 
-      setIsMakingRequest(isMakingRequest) {
-        this.isMakingRequest = isMakingRequest;
+            // restart polling
+            this.poll.restart({ data: this.requestData });
+          })
+          .catch(() => {
+            this.isLoading = false;
+            this.errorCallback();
 
-        if (isMakingRequest) {
-          this.updateGraphDropdown = false;
-        }
+            // restart polling
+            this.poll.restart();
+          });
       },
     },
   };
 </script>
 <template>
-  <div :class="cssClass">
-
+  <div class="pipelines-container">
     <div
       class="top-area scrolling-tabs-container inner-page-scroll-tabs"
-      v-if="!isLoading && !shouldRenderEmptyState">
+      v-if="!shouldRenderEmptyState"
+    >
       <div class="fade-left">
         <i
           class="fa fa-angle-left"
@@ -232,19 +211,21 @@
           aria-hidden="true">
         </i>
       </div>
+
       <navigation-tabs
-        :scope="scope"
-        :count="state.count"
-        :paths="paths"
-        />
+        :tabs="tabs"
+        @onChangeTab="onChangeTab"
+        scope="pipelines"
+      />
 
       <navigation-controls
         :new-pipeline-path="newPipelinePath"
         :has-ci-enabled="hasCiEnabled"
         :help-page-path="helpPagePath"
-        :ciLintPath="ciLintPath"
+        :reset-cache-path="resetCachePath"
+        :ci-lint-path="ciLintPath"
         :can-create-pipeline="canCreatePipelineParsed "
-        />
+      />
     </div>
 
     <div class="content-list pipelines">
@@ -253,37 +234,47 @@
         label="Loading Pipelines"
         size="3"
         v-if="isLoading"
-        />
+        class="prepend-top-20"
+      />
 
       <empty-state
         v-if="shouldRenderEmptyState"
         :help-page-path="helpPagePath"
-        />
+        :empty-state-svg-path="emptyStateSvgPath"
+      />
 
-      <error-state v-if="shouldRenderErrorState" />
+      <error-state
+        v-if="shouldRenderErrorState"
+        :error-state-svg-path="errorStateSvgPath"
+      />
 
       <div
-        class="blank-state blank-state-no-icon"
-        v-if="shouldRenderNoPipelinesMessage">
-        <h2 class="blank-state-title js-blank-state-title">No pipelines to show.</h2>
+        class="blank-state-row"
+        v-if="shouldRenderNoPipelinesMessage"
+      >
+        <div class="blank-state-center">
+          <h2 class="blank-state-title js-blank-state-title">No pipelines to show.</h2>
+        </div>
       </div>
 
       <div
         class="table-holder"
-        v-if="shouldRenderTable">
+        v-if="shouldRenderTable"
+      >
 
         <pipelines-table-component
           :pipelines="state.pipelines"
-          :service="service"
           :update-graph-dropdown="updateGraphDropdown"
-          />
+          :auto-devops-help-path="autoDevopsPath"
+          :view-type="viewType"
+        />
       </div>
 
       <table-pagination
         v-if="shouldRenderPagination"
-        :change="change"
-        :pageInfo="state.pageInfo"
-        />
+        :change="onChangePage"
+        :page-info="state.pageInfo"
+      />
     </div>
   </div>
 </template>

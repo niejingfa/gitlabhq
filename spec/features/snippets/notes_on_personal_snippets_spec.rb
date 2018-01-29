@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-describe 'Comments on personal snippets', :js, feature: true do
+describe 'Comments on personal snippets', :js do
   include NoteInteractionHelpers
 
   let!(:user)    { create(:user) }
@@ -14,7 +14,7 @@ describe 'Comments on personal snippets', :js, feature: true do
   let!(:other_note) { create(:note_on_personal_snippet) }
 
   before do
-    login_as user
+    sign_in user
     visit snippet_path(snippet)
   end
 
@@ -33,6 +33,7 @@ describe 'Comments on personal snippets', :js, feature: true do
         expect(page).to have_selector('.note-emoji-button')
       end
 
+      find('body').click # close dropdown
       open_more_actions_dropdown(snippet_notes[1])
 
       page.within("#notes-list li#note_#{snippet_notes[1].id}") do
@@ -46,8 +47,8 @@ describe 'Comments on personal snippets', :js, feature: true do
   context 'when submitting a note' do
     it 'shows a valid form' do
       is_expected.to have_css('.js-main-target-form', visible: true, count: 1)
-      expect(find('.js-main-target-form .js-comment-button').value).
-        to eq('Comment')
+      expect(find('.js-main-target-form .js-comment-button').value)
+        .to eq('Comment')
 
       page.within('.js-main-target-form') do
         expect(page).not_to have_link('Cancel')
@@ -70,15 +71,24 @@ describe 'Comments on personal snippets', :js, feature: true do
 
       expect(find('div#notes')).to have_content('This is awesome!')
     end
+
+    it 'should not have autocomplete' do
+      wait_for_requests
+
+      find('#note_note').native.send_keys('')
+      fill_in 'note[note]', with: '@'
+
+      wait_for_requests
+
+      # This selector probably won't be in place even if autocomplete was enabled
+      # but we want to make sure
+      expect(page).not_to have_selector('.atwho-view')
+    end
   end
 
   context 'when editing a note' do
     it 'changes the text' do
-      open_more_actions_dropdown(snippet_notes[0])
-
-      page.within("#notes-list li#note_#{snippet_notes[0].id}") do
-        click_on 'Edit comment'
-      end
+      find('.js-note-edit').click
 
       page.within('.current-note-edit-form') do
         fill_in 'note[note]', with: 'new content'
@@ -100,7 +110,7 @@ describe 'Comments on personal snippets', :js, feature: true do
       open_more_actions_dropdown(snippet_notes[0])
 
       page.within("#notes-list li#note_#{snippet_notes[0].id}") do
-        click_on 'Delete comment'
+        accept_confirm { click_on 'Delete comment' }
       end
 
       wait_for_requests

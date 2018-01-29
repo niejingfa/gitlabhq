@@ -1,8 +1,8 @@
 require 'spec_helper'
 
-describe 'Dashboard milestone tabs', :js, :feature do
+describe 'Dashboard milestone tabs', :js do
   let(:user) { create(:user) }
-  let(:project) { create(:empty_project) }
+  let(:project) { create(:project) }
   let!(:label) { create(:label, project: project) }
   let(:project_milestone) { create(:milestone, project: project) }
   let(:milestone) do
@@ -15,7 +15,7 @@ describe 'Dashboard milestone tabs', :js, :feature do
 
   before do
     project.add_master(user)
-    login_as(user)
+    sign_in(user)
 
     visit dashboard_milestone_path(milestone.safe_title, title: milestone.title)
   end
@@ -23,7 +23,7 @@ describe 'Dashboard milestone tabs', :js, :feature do
   it 'loads merge requests async' do
     click_link 'Merge Requests'
 
-    expect(page).to have_selector('.merge_requests-sortable-list')
+    expect(page).to have_selector('.milestone-merge_requests-list')
   end
 
   it 'loads participants async' do

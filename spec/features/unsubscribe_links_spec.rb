@@ -1,11 +1,11 @@
 require 'spec_helper'
 
-describe 'Unsubscribe links', feature: true do
+describe 'Unsubscribe links' do
   include Warden::Test::Helpers
 
   let(:recipient) { create(:user) }
   let(:author) { create(:user) }
-  let(:project) { create(:empty_project, :public) }
+  let(:project) { create(:project, :public) }
   let(:params) { { title: 'A bug!', description: 'Fix it!', assignees: [recipient] } }
   let(:issue) { Issues::CreateService.new(project, author, params).execute }
 
@@ -57,7 +57,7 @@ describe 'Unsubscribe links', feature: true do
 
   context 'when logged in' do
     before do
-      login_as(recipient)
+      sign_in(recipient)
     end
 
     it 'unsubscribes from the issue when visiting the link from the email body' do

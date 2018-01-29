@@ -61,8 +61,11 @@ module Network
         @reserved[i] = []
       end
 
-      commits_sort_by_ref.each do |commit|
-        place_chain(commit)
+      # n+1: https://gitlab.com/gitlab-org/gitlab-ce/issues/37436
+      Gitlab::GitalyClient.allow_n_plus_1_calls do
+        commits_sort_by_ref.each do |commit|
+          place_chain(commit)
+        end
       end
 
       # find parent spaces for not overlap lines
@@ -113,7 +116,7 @@ module Network
 
       opts[:ref] = @commit.id if @filter_ref
 
-      @repo.find_commits(opts)
+      Gitlab::Git::Commit.find_all(@repo.raw_repository, opts)
     end
 
     def commits_sort_by_ref
@@ -152,14 +155,14 @@ module Network
     end
 
     def find_free_parent_space(range, space_base, space_step, space_default)
-      if is_overlap?(range, space_default)
+      if overlap?(range, space_default)
         find_free_space(range, space_step, space_base, space_default)
       else
         space_default
       end
     end
 
-    def is_overlap?(range, overlap_space)
+    def overlap?(range, overlap_space)
       range.each do |i|
         if i != range.first &&
             i != range.last &&
@@ -206,7 +209,7 @@ module Network
 
       # Visit branching chains
       leaves.each do |l|
-        parents = l.parents(@map).select{|p| p.space.zero?}
+        parents = l.parents(@map).select {|p| p.space.zero?}
         parents.each do |p|
           place_chain(p, l.time)
         end
@@ -221,6 +224,7 @@ module Network
           space_base = parents.first.space
         end
       end
+
       space_base
     end
 

@@ -93,7 +93,13 @@ be an array or a multi-line string.
 > Introduced in GitLab 8.7 and requires Gitlab Runner v1.2
 
 `after_script` is used to define the command that will be run after for all
-jobs. This has to be an array or a multi-line string.
+jobs, including failed ones. This has to be an array or a multi-line string.
+
+> **Note:**
+The `before_script` and the main `script` are concatenated and run in a single context/container.
+The `after_script` is run separately, so depending on the executor, changes done
+outside of the working tree might not be visible, e.g. software installed in the
+`before_script`.
 
 ### stages
 
@@ -118,7 +124,7 @@ stages:
 1. First, all jobs of `build` are executed in parallel.
 1. If all jobs of `build` succeed, the `test` jobs are executed in parallel.
 1. If all jobs of `test` succeed, the `deploy` jobs are executed in parallel.
-1. If all jobs of `deploy` succeed, the commit is marked as `success`.
+1. If all jobs of `deploy` succeed, the commit is marked as `passed`.
 1. If any of the previous jobs fails, the commit is marked as `failed` and no
    jobs of further stage are executed.
 
@@ -130,7 +136,7 @@ There are also two edge cases worth mentioning:
 
 ### types
 
-> Deprecated, and will be removed in 10.0. Use [stages](#stages) instead.
+> Deprecated, and could be removed in one of the future releases. Use [stages](#stages) instead.
 
 Alias for [stages](#stages).
 
@@ -252,6 +258,8 @@ The `cache:key` variable can use any of the [predefined variables](../variables/
 The default key is **default** across the project, therefore everything is
 shared between each pipelines and jobs by default, starting from GitLab 9.0.
 
+>**Note:** The `cache:key` variable cannot contain the `/` character, or the equivalent URI encoded `%2F`; a value made only of dots (`.`, `%2E`) is also forbidden.
+
 ---
 
 **Example configurations**
@@ -276,7 +284,7 @@ To enable per-job and per-branch caching:
 
 ```yaml
 cache:
-  key: "$CI_JOB_NAME/$CI_COMMIT_REF_NAME"
+  key: "$CI_JOB_NAME-$CI_COMMIT_REF_NAME"
   untracked: true
 ```
 
@@ -284,7 +292,7 @@ To enable per-branch and per-stage caching:
 
 ```yaml
 cache:
-  key: "$CI_JOB_STAGE/$CI_COMMIT_REF_NAME"
+  key: "$CI_JOB_STAGE-$CI_COMMIT_REF_NAME"
   untracked: true
 ```
 
@@ -293,7 +301,7 @@ If you use **Windows Batch** to run your shell scripts you need to replace
 
 ```yaml
 cache:
-  key: "%CI_JOB_STAGE%/%CI_COMMIT_REF_NAME%"
+  key: "%CI_JOB_STAGE%-%CI_COMMIT_REF_NAME%"
   untracked: true
 ```
 
@@ -302,9 +310,56 @@ If you use **Windows PowerShell** to run your shell scripts you need to replace
 
 ```yaml
 cache:
-  key: "$env:CI_JOB_STAGE/$env:CI_COMMIT_REF_NAME"
+  key: "$env:CI_JOB_STAGE-$env:CI_COMMIT_REF_NAME"
   untracked: true
 ```
+
+### cache:policy
+
+> Introduced in GitLab 9.4.
+
+The default behaviour of a caching job is to download the files at the start of
+execution, and to re-upload them at the end. This allows any changes made by the
+job to be persisted for future runs, and is known as the `pull-push` cache
+policy.
+
+If you know the job doesn't alter the cached files, you can skip the upload step
+by setting `policy: pull` in the job specification. Typically, this would be
+twinned with an ordinary cache job at an earlier stage to ensure the cache
+is updated from time to time:
+
+```yaml
+stages:
+  - setup
+  - test
+
+prepare:
+  stage: setup
+  cache:
+    key: gems
+    paths:
+      - vendor/bundle
+  script:
+    - bundle install --deployment
+
+rspec:
+  stage: test
+  cache:
+    key: gems
+    paths:
+      - vendor/bundle
+    policy: pull
+  script:
+    - bundle exec rspec ...
+```
+
+This helps to speed up job execution and reduce load on the cache server,
+especially when you have a large number of cache-using jobs executing in
+parallel.
+
+Additionally, if you have a job that unconditionally recreates the cache without
+reference to its previous contents, you can use `policy: push` in that job to
+skip the download step.
 
 ## Jobs
 
@@ -348,6 +403,7 @@ job_name:
 | after_script  | no       | Override a set of commands that are executed after job |
 | environment   | no       | Defines a name of environment to which deployment is done by this job |
 | coverage      | no       | Define code coverage settings for a given job |
+| retry         | no       | Define how many times a job can be auto-retried in case of a failure |
 
 ### script
 
@@ -379,27 +435,39 @@ a "key: value" pair. Be careful when using special characters:
 are executed in `parallel`. For more info about the use of `stage` please check
 [stages](#stages).
 
-### only and except
+### only and except (simplified)
 
-`only` and `except` are two parameters that set a refs policy to limit when
-jobs are built:
+`only` and `except` are two parameters that set a job policy to limit when
+jobs are created:
 
 1. `only` defines the names of branches and tags for which the job will run.
 2. `except` defines the names of branches and tags for which the job will
     **not** run.
 
-There are a few rules that apply to the usage of refs policy:
+There are a few rules that apply to the usage of job policy:
 
 * `only` and `except` are inclusive. If both `only` and `except` are defined
    in a job specification, the ref is filtered by `only` and `except`.
 * `only` and `except` allow the use of regular expressions.
-* `only` and `except` allow the use of special keywords:
-`api`, `branches`, `external`, `tags`, `pushes`, `schedules`, `triggers`, and `web`
 * `only` and `except` allow to specify a repository path to filter jobs for
    forks.
 
+In addition, `only` and `except` allow the use of special keywords:
+
+| **Value** |  **Description**  |
+| --------- |  ---------------- |
+| `branches`  | When a branch is pushed.  |
+| `tags`      | When a tag is pushed.  |
+| `api`       | When pipeline has been triggered by a second pipelines API (not triggers API).  |
+| `external`  | When using CI services other than GitLab. |
+| `pipelines` | For multi-project triggers, created using the API with `CI_JOB_TOKEN`. |
+| `pushes`    | Pipeline is triggered by a `git push` by the user. |
+| `schedules` | For [scheduled pipelines][schedules]. |
+| `triggers`  | For pipelines created using a trigger token. |
+| `web`       | For pipelines created using **Run pipeline** button in GitLab UI (under your project's **Pipelines**). |
+
 In the example below, `job` will run only for refs that start with `issue-`,
-whereas all branches will be skipped.
+whereas all branches will be skipped:
 
 ```yaml
 job:
@@ -412,7 +480,7 @@ job:
 ```
 
 In this example, `job` will run only for refs that are tagged, or if a build is
-explicitly requested via an API trigger or a [Pipeline Schedule](../../user/project/pipelines/schedules.md).
+explicitly requested via an API trigger or a [Pipeline Schedule][schedules]:
 
 ```yaml
 job:
@@ -436,6 +504,36 @@ job:
 
 The above example will run `job` for all branches on `gitlab-org/gitlab-ce`,
 except master.
+
+### only and except (complex)
+
+> Introduced in GitLab 10.0
+
+> This an _alpha_ feature, and it it subject to change at any time without
+  prior notice!
+
+Since GitLab 10.0 it is possible to define a more elaborate only/except job
+policy configuration.
+
+GitLab now supports both, simple and complex strategies, so it is possible to
+use an array and a hash configuration scheme.
+
+Two keys are now available: `refs` and `kubernetes`. Refs strategy equals to
+simplified only/except configuration, whereas kubernetes strategy accepts only
+`active` keyword.
+
+See the example below. Job is going to be created only when pipeline has been
+scheduled or runs for a `master` branch, and only if kubernetes service is
+active in the project.
+
+```yaml
+job:
+  only:
+    refs:
+      - master
+      - schedules
+    kubernetes: active
+```
 
 ### Job variables
 
@@ -637,6 +735,9 @@ deployment to the `production` environment.
 - Before GitLab 8.11, the name of an environment could be defined as a string like
   `environment: production`. The recommended way now is to define it under the
   `name` keyword.
+- The `name` parameter can use any of the defined CI variables,
+  including predefined, secure variables and `.gitlab-ci.yml` [`variables`](#variables).
+  You however cannot use variables defined under `script`.
 
 The `environment` name can contain:
 
@@ -672,6 +773,9 @@ deploy to production:
 - Introduced in GitLab 8.11.
 - Before GitLab 8.11, the URL could be added only in GitLab's UI. The
   recommended way now is to define it in `.gitlab-ci.yml`.
+- The `url` parameter can use any of the defined CI variables,
+  including predefined, secure variables and `.gitlab-ci.yml` [`variables`](#variables).
+  You however cannot use variables defined under `script`.
 
 This is an optional value that when set, it exposes buttons in various places
 in GitLab which when clicked take you to the defined URL.
@@ -751,10 +855,9 @@ The `stop_review_app` job is **required** to have the following keywords defined
 **Notes:**
 - [Introduced][ce-6323] in GitLab 8.12 and GitLab Runner 1.6.
 - The `$CI_ENVIRONMENT_SLUG` was [introduced][ce-7983] in GitLab 8.15.
-
-`environment` can also represent a configuration hash with `name` and `url`.
-These parameters can use any of the defined [CI variables](#variables)
-(including predefined, secure variables and `.gitlab-ci.yml` variables).
+- The `name` and `url` parameters can use any of the defined CI variables,
+  including predefined, secure variables and `.gitlab-ci.yml` [`variables`](#variables).
+  You however cannot use variables defined under `script`.
 
 For example:
 
@@ -1005,6 +1108,8 @@ a list of all previous jobs from which the artifacts should be downloaded.
 You can only define jobs from stages that are executed before the current one.
 An error will be shown if you define jobs from the current stage or next ones.
 Defining an empty array will skip downloading any artifacts for that job.
+The status of the previous job is not considered when using `dependencies`, so
+if it failed or it is a manual job that was not run, no error occurs.
 
 ---
 
@@ -1048,6 +1153,20 @@ deploy:
   script: make deploy
 ```
 
+#### When a dependent job will fail
+
+> Introduced in GitLab 10.3.
+
+If the artifacts of the job that is set as a dependency have been
+[expired](#artifacts-expire_in) or
+[erased](../../user/project/pipelines/job_artifacts.md#erasing-artifacts), then
+the dependent job will fail.
+
+NOTE: **Note:**
+You can ask your administrator to
+[flip this switch](../../administration/job_artifacts.md#validation-for-dependencies)
+and bring back the old behavior.
+
 ### before_script and after_script
 
 It's possible to overwrite the globally defined `before_script` and `after_script`:
@@ -1082,7 +1201,31 @@ A simple example:
 
 ```yaml
 job1:
+  script: rspec
   coverage: '/Code coverage: \d+\.\d+/'
+```
+
+### retry
+
+**Notes:**
+- [Introduced][ce-3442] in GitLab 9.5.
+
+`retry` allows you to configure how many times a job is going to be retried in
+case of a failure.
+
+When a job fails, and has `retry` configured it is going to be processed again
+up to the amount of times specified by the `retry` keyword.
+
+If `retry` is set to 2, and a job succeeds in a second run (first retry), it won't be retried
+again. `retry` value has to be a positive integer, equal or larger than 0, but
+lower or equal to 2 (two retries maximum, three runs in total).
+
+A simple example:
+
+```yaml
+test:
+  script: rspec
+  retry: 2
 ```
 
 ## Git Strategy
@@ -1150,7 +1293,7 @@ to the CI pipeline:
 ```yaml
 variables:
   GIT_STRATEGY: clone
-  GIT_CHECKOUT: false
+  GIT_CHECKOUT: "false"
 script:
   - git checkout master
   - git merge $CI_BUILD_REF_NAME
@@ -1250,25 +1393,31 @@ variables:
   GIT_DEPTH: "3"
 ```
 
-## Hidden keys
+## Hidden keys (jobs)
 
 > Introduced in GitLab 8.6 and GitLab Runner v1.1.1.
 
-Keys that start with a dot (`.`) will be not processed by GitLab CI. You can
-use this feature to ignore jobs, or use the
-[special YAML features](#special-yaml-features) and transform the hidden keys
-into templates.
+If you want to temporarily 'disable' a job, rather than commenting out all the
+lines where the job is defined:
 
-In the following example, `.key_name` will be ignored:
-
-```yaml
-.key_name:
-  script:
-    - rake spec
+```
+#hidden_job:
+#  script:
+#    - run test
 ```
 
-Hidden keys can be hashes like normal CI jobs, but you are also allowed to use
-different types of structures to leverage special YAML features.
+you can instead start its name with a dot (`.`) and it will not be processed by
+GitLab CI. In the following example, `.hidden_job` will be ignored:
+
+```yaml
+.hidden_job:
+  script:
+    - run test
+```
+
+Use this feature to ignore jobs, or use the
+[special YAML features](#special-yaml-features) and transform the hidden keys
+into templates.
 
 ## Special YAML features
 
@@ -1284,7 +1433,7 @@ Read more about the various [YAML features](https://learnxinyminutes.com/docs/ya
 
 YAML has a handy feature called 'anchors', which lets you easily duplicate
 content across your document. Anchors can be used to duplicate/inherit
-properties, and is a perfect example to be used with [hidden keys](#hidden-keys)
+properties, and is a perfect example to be used with [hidden keys](#hidden-keys-jobs)
 to provide templates for your jobs.
 
 The following example uses anchors and map merging. It will create two jobs,
@@ -1441,6 +1590,11 @@ Read more on [GitLab Pages user documentation](../../user/project/pages/index.md
 Each instance of GitLab CI has an embedded debug tool called Lint.
 You can find the link under `/ci/lint` of your gitlab instance.
 
+## Using reserved keywords
+
+If you get validation error when using specific values (e.g., `true` or `false`),
+try to quote them, or change them to a different form (e.g., `/bin/true`).
+
 ## Skipping jobs
 
 If your commit message contains `[ci skip]` or `[skip ci]`, using any
@@ -1459,3 +1613,5 @@ CI with various languages.
 [variables]: ../variables/README.md
 [ce-7983]: https://gitlab.com/gitlab-org/gitlab-ce/merge_requests/7983
 [ce-7447]: https://gitlab.com/gitlab-org/gitlab-ce/merge_requests/7447
+[ce-3442]: https://gitlab.com/gitlab-org/gitlab-ce/merge_requests/3442
+[schedules]: ../../user/project/pipelines/schedules.md

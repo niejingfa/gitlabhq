@@ -45,7 +45,10 @@ module API
       end
       delete '/' do
         authenticate_runner!
-        Ci::Runner.find_by_token(params[:token]).destroy
+
+        runner = Ci::Runner.find_by_token(params[:token])
+
+        destroy_conditionally!(runner)
       end
 
       desc 'Validates authentication credentials' do
@@ -77,7 +80,7 @@ module API
         no_content! unless current_runner.active?
         update_runner_info
 
-        if current_runner.is_runner_queue_value_latest?(params[:last_update])
+        if current_runner.runner_queue_value_latest?(params[:last_update])
           header 'X-GitLab-Last-Update', params[:last_update]
           Gitlab::Metrics.add_event(:build_not_found_cached)
           return no_content!
@@ -89,7 +92,7 @@ module API
         if result.valid?
           if result.build
             Gitlab::Metrics.add_event(:build_found,
-                                      project: result.build.project.path_with_namespace)
+                                      project: result.build.project.full_path)
             present result.build, with: Entities::JobRequest::Response
           else
             Gitlab::Metrics.add_event(:build_not_found)
@@ -111,6 +114,8 @@ module API
         requires :id, type: Integer, desc: %q(Job's ID)
         optional :trace, type: String, desc: %q(Job's full trace)
         optional :state, type: String, desc: %q(Job's status: success, failed)
+        optional :failure_reason, type: String, values: CommitStatus.failure_reasons.keys,
+                                  desc: %q(Job's failure_reason)
       end
       put '/:id' do
         job = authenticate_job!
@@ -118,13 +123,13 @@ module API
         job.trace.set(params[:trace]) if params[:trace]
 
         Gitlab::Metrics.add_event(:update_build,
-                                  project: job.project.path_with_namespace)
+                                  project: job.project.full_path)
 
         case params[:state].to_s
         when 'success'
           job.success
         when 'failed'
-          job.drop
+          job.drop(params[:failure_reason] || :unknown_failure)
         end
       end
 
@@ -210,17 +215,19 @@ module API
         job = authenticate_job!
         forbidden!('Job is not running!') unless job.running?
 
-        artifacts_upload_path = ArtifactUploader.artifacts_upload_path
+        artifacts_upload_path = JobArtifactUploader.artifacts_upload_path
         artifacts = uploaded_file(:file, artifacts_upload_path)
         metadata = uploaded_file(:metadata, artifacts_upload_path)
 
         bad_request!('Missing artifacts file!') unless artifacts
         file_to_large! unless artifacts.size < max_artifacts_size
 
-        job.artifacts_file = artifacts
-        job.artifacts_metadata = metadata
-        job.artifacts_expire_in = params['expire_in'] ||
+        expire_in = params['expire_in'] ||
           Gitlab::CurrentSettings.current_application_settings.default_artifacts_expire_in
+
+        job.build_job_artifacts_archive(project: job.project, file_type: :archive, file: artifacts, expire_in: expire_in)
+        job.build_job_artifacts_metadata(project: job.project, file_type: :metadata, file: metadata, expire_in: expire_in) if metadata
+        job.artifacts_expire_in = expire_in
 
         if job.save
           present job, with: Entities::JobRequest::Response

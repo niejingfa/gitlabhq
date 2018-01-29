@@ -1,9 +1,12 @@
+import _ from 'underscore';
+
 import '~/smart_interval';
 
 import timeTracker from './time_tracker';
 
 import Store from '../../stores/sidebar_store';
 import Mediator from '../../sidebar_mediator';
+import eventHub from '../../event_hub';
 
 export default {
   data() {
@@ -16,10 +19,13 @@ export default {
     'issuable-time-tracker': timeTracker,
   },
   methods: {
-    listenForSlashCommands() {
-      $(document).on('ajax:success', '.gfm-form', this.slashCommandListened);
+    listenForQuickActions() {
+      $(document).on('ajax:success', '.gfm-form', this.quickActionListened);
+      eventHub.$on('timeTrackingUpdated', (data) => {
+        this.quickActionListened(null, data);
+      });
     },
-    slashCommandListened(e, data) {
+    quickActionListened(e, data) {
       const subscribedCommands = ['spend_time', 'time_estimate'];
       let changedCommands;
       if (data !== undefined) {
@@ -35,7 +41,7 @@ export default {
     },
   },
   mounted() {
-    this.listenForSlashCommands();
+    this.listenForQuickActions();
   },
   template: `
     <div class="block">

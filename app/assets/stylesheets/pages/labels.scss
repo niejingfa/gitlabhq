@@ -104,7 +104,7 @@
 }
 
 .color-label {
-  padding: 3px 7px;
+  padding: 3px $label-padding;
   border-radius: $label-border-radius;
 }
 
@@ -138,6 +138,7 @@
     .fa {
       font-size: 18px;
       vertical-align: middle;
+      pointer-events: none;
     }
 
     &:hover {
@@ -278,5 +279,9 @@
 
 .label-link {
   display: inline-block;
-  vertical-align: text-top;
+  vertical-align: top;
+
+  .label {
+    vertical-align: inherit;
+  }
 }

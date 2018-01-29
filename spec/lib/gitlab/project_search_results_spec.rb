@@ -1,8 +1,8 @@
 require 'spec_helper'
 
-describe Gitlab::ProjectSearchResults, lib: true do
+describe Gitlab::ProjectSearchResults do
   let(:user) { create(:user) }
-  let(:project) { create(:empty_project) }
+  let(:project) { create(:project) }
   let(:query) { 'hello world' }
 
   describe 'initialize with empty ref' do
@@ -81,8 +81,32 @@ describe Gitlab::ProjectSearchResults, lib: true do
         expect(subject.data.lines[2]).to eq("  - Feature: Replace teams with group membership\n")
       end
 
+      context 'when the matching filename contains a colon' do
+        let(:search_result) { "\nmaster:testdata/project::function1.yaml\x001\x00---\n" }
+
+        it 'returns a valid FoundBlob' do
+          expect(subject.filename).to eq('testdata/project::function1.yaml')
+          expect(subject.basename).to eq('testdata/project::function1')
+          expect(subject.ref).to eq('master')
+          expect(subject.startline).to eq(1)
+          expect(subject.data).to eq('---')
+        end
+      end
+
+      context 'when the matching content contains a number surrounded by colons' do
+        let(:search_result) { "\nmaster:testdata/foo.txt\x001\x00blah:9:blah" }
+
+        it 'returns a valid FoundBlob' do
+          expect(subject.filename).to eq('testdata/foo.txt')
+          expect(subject.basename).to eq('testdata/foo')
+          expect(subject.ref).to eq('master')
+          expect(subject.startline).to eq(1)
+          expect(subject.data).to eq('blah:9:blah')
+        end
+      end
+
       context "when filename has extension" do
-        let(:search_result) { "master:CONTRIBUTE.md:5:- [Contribute to GitLab](#contribute-to-gitlab)\n" }
+        let(:search_result) { "master:CONTRIBUTE.md\x005\x00- [Contribute to GitLab](#contribute-to-gitlab)\n" }
 
         it { expect(subject.path).to eq('CONTRIBUTE.md') }
         it { expect(subject.filename).to eq('CONTRIBUTE.md') }
@@ -90,7 +114,7 @@ describe Gitlab::ProjectSearchResults, lib: true do
       end
 
       context "when file under directory" do
-        let(:search_result) { "master:a/b/c.md:5:a b c\n" }
+        let(:search_result) { "master:a/b/c.md\x005\x00a b c\n" }
 
         it { expect(subject.path).to eq('a/b/c.md') }
         it { expect(subject.filename).to eq('a/b/c.md') }
@@ -135,7 +159,7 @@ describe Gitlab::ProjectSearchResults, lib: true do
     end
 
     it 'finds by content' do
-      expect(results).to include("master:Title.md:1:Content\n")
+      expect(results).to include("master:Title.md\x001\x00Content\n")
     end
   end
 
@@ -154,7 +178,7 @@ describe Gitlab::ProjectSearchResults, lib: true do
     let(:non_member) { create(:user) }
     let(:member) { create(:user) }
     let(:admin) { create(:admin) }
-    let(:project) { create(:empty_project, :internal) }
+    let(:project) { create(:project, :internal) }
     let!(:issue) { create(:issue, project: project, title: 'Issue 1') }
     let!(:security_issue_1) { create(:issue, :confidential, project: project, title: 'Security issue 1', author: author) }
     let!(:security_issue_2) { create(:issue, :confidential, title: 'Security issue 2', project: project, assignees: [assignee]) }
@@ -170,7 +194,7 @@ describe Gitlab::ProjectSearchResults, lib: true do
     end
 
     it 'does not list project confidential issues for project members with guest role' do
-      project.team << [member, :guest]
+      project.add_guest(member)
 
       results = described_class.new(member, project, query)
       issues = results.objects('issues')
@@ -202,7 +226,7 @@ describe Gitlab::ProjectSearchResults, lib: true do
     end
 
     it 'lists project confidential issues for project members' do
-      project.team << [member, :developer]
+      project.add_developer(member)
 
       results = described_class.new(member, project, query)
       issues = results.objects('issues')
@@ -226,7 +250,7 @@ describe Gitlab::ProjectSearchResults, lib: true do
 
   describe 'notes search' do
     it 'lists notes' do
-      project = create(:empty_project, :public)
+      project = create(:project, :public)
       note = create(:note, project: project)
 
       results = described_class.new(user, project, note.note)
@@ -235,7 +259,7 @@ describe Gitlab::ProjectSearchResults, lib: true do
     end
 
     it "doesn't list issue notes when access is restricted" do
-      project = create(:empty_project, :public, :issues_private)
+      project = create(:project, :public, :issues_private)
       note = create(:note_on_issue, project: project)
 
       results = described_class.new(user, project, note.note)
@@ -244,7 +268,7 @@ describe Gitlab::ProjectSearchResults, lib: true do
     end
 
     it "doesn't list merge_request notes when access is restricted" do
-      project = create(:empty_project, :public, :merge_requests_private)
+      project = create(:project, :public, :merge_requests_private)
       note = create(:note_on_merge_request, project: project)
 
       results = described_class.new(user, project, note.note)
@@ -281,12 +305,12 @@ describe Gitlab::ProjectSearchResults, lib: true do
       let!(:private_project) { create(:project, :private, :repository, creator: creator, namespace: creator.namespace) }
       let(:team_master) do
         user = create(:user, username: 'private-project-master')
-        private_project.team << [user, :master]
+        private_project.add_master(user)
         user
       end
       let(:team_reporter) do
         user = create(:user, username: 'private-project-reporter')
-        private_project.team << [user, :reporter]
+        private_project.add_reporter(user)
         user
       end
 

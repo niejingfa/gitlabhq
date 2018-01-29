@@ -1,33 +1,43 @@
 <script>
-/**
- * Renders the external url link in environments table.
- */
-export default {
-  props: {
-    externalUrl: {
-      type: String,
-      required: true,
-    },
-  },
+  import tooltip from '../../vue_shared/directives/tooltip';
+  import { s__ } from '../../locale';
 
-  computed: {
-    title() {
-      return 'Open';
+  /**
+  * Renders the external url link in environments table.
+  */
+  export default {
+    directives: {
+      tooltip,
     },
-  },
-};
+    props: {
+      externalUrl: {
+        type: String,
+        required: true,
+      },
+    },
+
+    computed: {
+      title() {
+        return s__('Environments|Open');
+      },
+    },
+  };
 </script>
 <template>
   <a
-    class="btn external-url has-tooltip"
+    v-tooltip
+    class="btn external-url"
     data-container="body"
     target="_blank"
     rel="noopener noreferrer nofollow"
     :title="title"
     :aria-label="title"
-    :href="externalUrl">
+    :href="externalUrl"
+  >
     <i
       class="fa fa-external-link"
-      aria-hidden="true" />
+      aria-hidden="true"
+    >
+    </i>
   </a>
 </template>

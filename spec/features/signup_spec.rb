@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-feature 'Signup', feature: true do
+feature 'Signup' do
   describe 'signup with no errors' do
     context "when sending confirmation email" do
       before do
@@ -21,6 +21,24 @@ feature 'Signup', feature: true do
 
         expect(current_path).to eq users_almost_there_path
         expect(page).to have_content("Please check your email to confirm your account")
+      end
+    end
+
+    context "when sigining up with different cased emails" do
+      it "creates the user successfully" do
+        user = build(:user)
+
+        visit root_path
+
+        fill_in 'new_user_name',                with: user.name
+        fill_in 'new_user_username',            with: user.username
+        fill_in 'new_user_email',               with: user.email
+        fill_in 'new_user_email_confirmation',  with: user.email.capitalize
+        fill_in 'new_user_password',            with: user.password
+        click_button "Register"
+
+        expect(current_path).to eq dashboard_projects_path
+        expect(page).to have_content("Welcome! You have signed up successfully.")
       end
     end
 

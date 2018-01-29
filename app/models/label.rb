@@ -15,9 +15,9 @@ class Label < ActiveRecord::Base
 
   default_value_for :color, DEFAULT_COLOR
 
-  has_many :lists, dependent: :destroy
+  has_many :lists, dependent: :destroy # rubocop:disable Cop/ActiveRecordDependent
   has_many :priorities, class_name: 'LabelPriority'
-  has_many :label_links, dependent: :destroy
+  has_many :label_links, dependent: :destroy # rubocop:disable Cop/ActiveRecordDependent
   has_many :issues, through: :label_links, source: :target, source_type: 'Issue'
   has_many :merge_requests, through: :label_links, source: :target, source_type: 'MergeRequest'
 
@@ -34,7 +34,8 @@ class Label < ActiveRecord::Base
 
   scope :templates, -> { where(template: true) }
   scope :with_title, ->(title) { where(title: title) }
-  scope :on_project_boards, ->(project_id) { joins(lists: :board).merge(List.movable).where(boards: { project_id: project_id }) }
+  scope :with_lists_and_board, -> { joins(lists: :board).merge(List.movable) }
+  scope :on_project_boards, ->(project_id) { with_lists_and_board.where(boards: { project_id: project_id }) }
 
   def self.prioritized(project)
     joins(:priorities)
@@ -46,9 +47,9 @@ class Label < ActiveRecord::Base
     labels = Label.arel_table
     priorities = LabelPriority.arel_table
 
-    label_priorities = labels.join(priorities, Arel::Nodes::OuterJoin).
-                              on(labels[:id].eq(priorities[:label_id]).and(priorities[:project_id].eq(project.id))).
-                              join_sources
+    label_priorities = labels.join(priorities, Arel::Nodes::OuterJoin)
+                              .on(labels[:id].eq(priorities[:label_id]).and(priorities[:project_id].eq(project.id)))
+                              .join_sources
 
     joins(label_priorities).where(priorities[:priority].eq(nil))
   end
@@ -57,9 +58,9 @@ class Label < ActiveRecord::Base
     labels = Label.arel_table
     priorities = LabelPriority.arel_table
 
-    label_priorities = labels.join(priorities, Arel::Nodes::OuterJoin).
-                              on(labels[:id].eq(priorities[:label_id])).
-                              join_sources
+    label_priorities = labels.join(priorities, Arel::Nodes::OuterJoin)
+                              .on(labels[:id].eq(priorities[:label_id]))
+                              .join_sources
 
     joins(label_priorities)
   end
@@ -126,7 +127,13 @@ class Label < ActiveRecord::Base
   end
 
   def priority(project)
-    priorities.find_by(project: project).try(:priority)
+    priority = if priorities.loaded?
+                 priorities.first { |p| p.project == project }
+               else
+                 priorities.find_by(project: project)
+               end
+
+    priority.try(:priority)
   end
 
   def template?
@@ -159,12 +166,12 @@ class Label < ActiveRecord::Base
   #
   # Returns a String
   #
-  def to_reference(from_project = nil, target_project: nil, format: :id, full: false)
+  def to_reference(from = nil, target_project: nil, format: :id, full: false)
     format_reference = label_format_reference(format)
     reference = "#{self.class.reference_prefix}#{format_reference}"
 
-    if from_project
-      "#{from_project.to_reference(target_project, full: full)}#{reference}"
+    if from
+      "#{from.to_reference(target_project, full: full)}#{reference}"
     else
       reference
     end
@@ -172,6 +179,7 @@ class Label < ActiveRecord::Base
 
   def as_json(options = {})
     super(options).tap do |json|
+      json[:type] = self.try(:type)
       json[:priority] = priority(options[:project]) if options.key?(:project)
     end
   end

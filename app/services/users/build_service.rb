@@ -1,6 +1,7 @@
 module Users
-  # Service for building a new user.
   class BuildService < BaseService
+    include Gitlab::CurrentSettings
+
     def initialize(current_user, params = {})
       @current_user = current_user
       @params = params.dup
@@ -33,7 +34,7 @@ module Users
     private
 
     def can_create_user?
-      (current_user.nil? && current_application_settings.signup_enabled?) || current_user&.admin?
+      (current_user.nil? && current_application_settings.allow_signup?) || current_user&.admin?
     end
 
     # Allowed params for creating a user (admins only)

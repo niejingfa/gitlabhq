@@ -31,6 +31,7 @@ module Banzai
         nodes.each do |node|
           if node.has_attribute?(group_attr)
             next unless can_read_group_reference?(node, user, groups)
+
             visible << node
           elsif can_read_project_reference?(node)
             visible << node
@@ -99,8 +100,8 @@ module Banzai
       def find_users_for_projects(ids)
         return [] if ids.empty?
 
-        collection_objects_for_ids(Project, ids).
-          flat_map { |p| p.team.members.to_a }
+        collection_objects_for_ids(Project, ids)
+          .flat_map { |p| p.team.members.to_a }
       end
 
       def can_read_reference?(user, ref_project, node)

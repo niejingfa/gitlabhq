@@ -1,7 +1,10 @@
 require 'spec_helper'
 
-describe Namespace, models: true do
+describe Namespace do
+  include ProjectForksHelper
+
   let!(:namespace) { create(:namespace) }
+  let(:gitlab_shell) { Gitlab::Shell.new }
 
   describe 'associations' do
     it { is_expected.to have_many :projects }
@@ -44,7 +47,7 @@ describe Namespace, models: true do
       end
 
       context "is case insensitive" do
-        let(:group) { build(:group, path: "System") }
+        let(:group) { build(:group, path: "Groups") }
 
         it { expect(group).not_to be_valid }
       end
@@ -61,6 +64,14 @@ describe Namespace, models: true do
     it { is_expected.to respond_to(:human_name) }
     it { is_expected.to respond_to(:to_param) }
     it { is_expected.to respond_to(:has_parent?) }
+  end
+
+  describe 'inclusions' do
+    it { is_expected.to include_module(Gitlab::VisibilityLevel) }
+  end
+
+  describe '#visibility_level_field' do
+    it { expect(namespace.visibility_level_field).to eq(:visibility_level) }
   end
 
   describe '#to_param' do
@@ -103,7 +114,7 @@ describe Namespace, models: true do
     let(:namespace) { create :namespace }
 
     let(:project1) do
-      create(:empty_project,
+      create(:project,
              namespace: namespace,
              statistics: build(:project_statistics,
                                storage_size:         606,
@@ -113,7 +124,7 @@ describe Namespace, models: true do
     end
 
     let(:project2) do
-      create(:empty_project,
+      create(:project,
              namespace: namespace,
              statistics: build(:project_statistics,
                                storage_size:         60,
@@ -125,7 +136,7 @@ describe Namespace, models: true do
     it "sums all project storage counters in the namespace" do
       project1
       project2
-      statistics = Namespace.with_statistics.find(namespace.id)
+      statistics = described_class.with_statistics.find(namespace.id)
 
       expect(statistics.storage_size).to eq 666
       expect(statistics.repository_size).to eq 111
@@ -134,7 +145,7 @@ describe Namespace, models: true do
     end
 
     it "correctly handles namespaces without projects" do
-      statistics = Namespace.with_statistics.find(namespace.id)
+      statistics = described_class.with_statistics.find(namespace.id)
 
       expect(statistics.storage_size).to eq 0
       expect(statistics.repository_size).to eq 0
@@ -143,23 +154,32 @@ describe Namespace, models: true do
     end
   end
 
-  describe '#move_dir', repository: true do
-    before do
-      @namespace = create :namespace
-      @project = create(:project_empty_repo, namespace: @namespace)
-      allow(@namespace).to receive(:path_changed?).and_return(true)
+  describe '#ancestors_upto', :nested_groups do
+    let(:parent) { create(:group) }
+    let(:child) { create(:group, parent: parent) }
+    let(:child2) { create(:group, parent: child) }
+
+    it 'returns all ancestors when no namespace is given' do
+      expect(child2.ancestors_upto).to contain_exactly(child, parent)
     end
 
+    it 'includes ancestors upto but excluding the given ancestor' do
+      expect(child2.ancestors_upto(parent)).to contain_exactly(child)
+    end
+  end
+
+  describe '#move_dir', :request_store do
+    let(:namespace) { create(:namespace) }
+    let!(:project) { create(:project_empty_repo, namespace: namespace) }
+
     it "raises error when directory exists" do
-      expect { @namespace.move_dir }.to raise_error("namespace directory cannot be moved")
+      expect { namespace.move_dir }.to raise_error("namespace directory cannot be moved")
     end
 
     it "moves dir if path changed" do
-      new_path = @namespace.full_path + "_new"
-      allow(@namespace).to receive(:full_path_was).and_return(@namespace.full_path)
-      allow(@namespace).to receive(:full_path).and_return(new_path)
-      expect(@namespace).to receive(:remove_exports!)
-      expect(@namespace.move_dir).to be_truthy
+      namespace.update_attributes(path: namespace.full_path + '_new')
+
+      expect(gitlab_shell.exists?(project.repository_storage_path, "#{namespace.path}/#{project.path}.git")).to be_truthy
     end
 
     context "when any project has container images" do
@@ -169,21 +189,21 @@ describe Namespace, models: true do
         stub_container_registry_config(enabled: true)
         stub_container_registry_tags(repository: :any, tags: ['tag'])
 
-        create(:empty_project, namespace: @namespace, container_repositories: [container_repository])
+        create(:project, namespace: namespace, container_repositories: [container_repository])
 
-        allow(@namespace).to receive(:path_was).and_return(@namespace.path)
-        allow(@namespace).to receive(:path).and_return('new_path')
+        allow(namespace).to receive(:path_was).and_return(namespace.path)
+        allow(namespace).to receive(:path).and_return('new_path')
       end
 
       it 'raises an error about not movable project' do
-        expect { @namespace.move_dir }.to raise_error(/Namespace cannot be moved/)
+        expect { namespace.move_dir }.to raise_error(/Namespace cannot be moved/)
       end
     end
 
     context 'with subgroups' do
       let(:parent) { create(:group, name: 'parent', path: 'parent') }
       let(:child) { create(:group, name: 'child', path: 'child', parent: parent) }
-      let!(:project) { create(:project_empty_repo, path: 'the-project', namespace: child) }
+      let!(:project) { create(:project_empty_repo, path: 'the-project', namespace: child, skip_disk_validation: true) }
       let(:uploads_dir) { File.join(CarrierWave.root, FileUploader.base_dir) }
       let(:pages_dir) { File.join(TestEnv.pages_path) }
 
@@ -220,9 +240,27 @@ describe Namespace, models: true do
         end
       end
     end
+
+    it 'updates project full path in .git/config for each project inside namespace' do
+      parent = create(:group, name: 'mygroup', path: 'mygroup')
+      subgroup = create(:group, name: 'mysubgroup', path: 'mysubgroup', parent: parent)
+      project_in_parent_group = create(:project, :repository, namespace: parent, name: 'foo1')
+      hashed_project_in_subgroup = create(:project, :repository, :hashed, namespace: subgroup, name: 'foo2')
+      legacy_project_in_subgroup = create(:project, :repository, namespace: subgroup, name: 'foo3')
+
+      parent.update(path: 'mygroup_new')
+
+      expect(project_rugged(project_in_parent_group).config['gitlab.fullpath']).to eq "mygroup_new/#{project_in_parent_group.path}"
+      expect(project_rugged(hashed_project_in_subgroup).config['gitlab.fullpath']).to eq "mygroup_new/mysubgroup/#{hashed_project_in_subgroup.path}"
+      expect(project_rugged(legacy_project_in_subgroup).config['gitlab.fullpath']).to eq "mygroup_new/mysubgroup/#{legacy_project_in_subgroup.path}"
+    end
+
+    def project_rugged(project)
+      project.repository.rugged
+    end
   end
 
-  describe '#rm_dir', 'callback', repository: true do
+  describe '#rm_dir', 'callback' do
     let!(:project) { create(:project_empty_repo, namespace: namespace) }
     let(:repository_storage_path) { Gitlab.config.repositories.storages.default['path'] }
     let(:path_in_dir) { File.join(repository_storage_path, namespace.full_path) }
@@ -278,9 +316,9 @@ describe Namespace, models: true do
       @namespace = create(:namespace, name: 'WoW', path: 'woW')
     end
 
-    it { expect(Namespace.find_by_path_or_name('wow')).to eq(@namespace) }
-    it { expect(Namespace.find_by_path_or_name('WOW')).to eq(@namespace) }
-    it { expect(Namespace.find_by_path_or_name('unknown')).to eq(nil) }
+    it { expect(described_class.find_by_path_or_name('wow')).to eq(@namespace) }
+    it { expect(described_class.find_by_path_or_name('WOW')).to eq(@namespace) }
+    it { expect(described_class.find_by_path_or_name('unknown')).to eq(nil) }
   end
 
   describe ".clean_path" do
@@ -288,8 +326,8 @@ describe Namespace, models: true do
     let!(:namespace)  { create(:namespace, path: "JohnGitLab-etc1") }
 
     it "cleans the path and makes sure it's available" do
-      expect(Namespace.clean_path("-john+gitlab-ETC%.git@gmail.com")).to eq("johngitlab-ETC2")
-      expect(Namespace.clean_path("--%+--valid_*&%name=.git.%.atom.atom.@email.com")).to eq("valid_name")
+      expect(described_class.clean_path("-john+gitlab-ETC%.git@gmail.com")).to eq("johngitlab-ETC2")
+      expect(described_class.clean_path("--%+--valid_*&%name=.git.%.atom.atom.@email.com")).to eq("valid_name")
     end
   end
 
@@ -304,6 +342,20 @@ describe Namespace, models: true do
       expect(deep_nested_group.ancestors).to include(group, nested_group)
       expect(nested_group.ancestors).to include(group)
       expect(group.ancestors).to eq([])
+    end
+  end
+
+  describe '#self_and_ancestors', :nested_groups do
+    let(:group) { create(:group) }
+    let(:nested_group) { create(:group, parent: group) }
+    let(:deep_nested_group) { create(:group, parent: nested_group) }
+    let(:very_deep_nested_group) { create(:group, parent: deep_nested_group) }
+
+    it 'returns the correct ancestors' do
+      expect(very_deep_nested_group.self_and_ancestors).to contain_exactly(group, nested_group, deep_nested_group, very_deep_nested_group)
+      expect(deep_nested_group.self_and_ancestors).to contain_exactly(group, nested_group, deep_nested_group)
+      expect(nested_group.self_and_ancestors).to contain_exactly(group, nested_group)
+      expect(group.self_and_ancestors).to contain_exactly(group)
     end
   end
 
@@ -323,10 +375,45 @@ describe Namespace, models: true do
     end
   end
 
+  describe '#self_and_descendants', :nested_groups do
+    let!(:group) { create(:group, path: 'git_lab') }
+    let!(:nested_group) { create(:group, parent: group) }
+    let!(:deep_nested_group) { create(:group, parent: nested_group) }
+    let!(:very_deep_nested_group) { create(:group, parent: deep_nested_group) }
+    let!(:another_group) { create(:group, path: 'gitllab') }
+    let!(:another_group_nested) { create(:group, path: 'foo', parent: another_group) }
+
+    it 'returns the correct descendants' do
+      expect(very_deep_nested_group.self_and_descendants).to contain_exactly(very_deep_nested_group)
+      expect(deep_nested_group.self_and_descendants).to contain_exactly(deep_nested_group, very_deep_nested_group)
+      expect(nested_group.self_and_descendants).to contain_exactly(nested_group, deep_nested_group, very_deep_nested_group)
+      expect(group.self_and_descendants).to contain_exactly(group, nested_group, deep_nested_group, very_deep_nested_group)
+    end
+  end
+
+  describe '#users_with_descendants', :nested_groups do
+    let(:user_a) { create(:user) }
+    let(:user_b) { create(:user) }
+
+    let(:group) { create(:group) }
+    let(:nested_group) { create(:group, parent: group) }
+    let(:deep_nested_group) { create(:group, parent: nested_group) }
+
+    it 'returns member users on every nest level without duplication' do
+      group.add_developer(user_a)
+      nested_group.add_developer(user_b)
+      deep_nested_group.add_developer(user_a)
+
+      expect(group.users_with_descendants).to contain_exactly(user_a, user_b)
+      expect(nested_group.users_with_descendants).to contain_exactly(user_a, user_b)
+      expect(deep_nested_group.users_with_descendants).to contain_exactly(user_a)
+    end
+  end
+
   describe '#user_ids_for_project_authorizations' do
     it 'returns the user IDs for which to refresh authorizations' do
-      expect(namespace.user_ids_for_project_authorizations).
-        to eq([namespace.owner_id])
+      expect(namespace.user_ids_for_project_authorizations)
+        .to eq([namespace.owner_id])
     end
   end
 
@@ -336,6 +423,177 @@ describe Namespace, models: true do
     let!(:project1) { create(:project_empty_repo, namespace: group) }
     let!(:project2) { create(:project_empty_repo, namespace: child) }
 
-    it { expect(group.all_projects.to_a).to eq([project2, project1]) }
+    it { expect(group.all_projects.to_a).to match_array([project2, project1]) }
+  end
+
+  describe '#share_with_group_lock with subgroups', :nested_groups do
+    context 'when creating a subgroup' do
+      let(:subgroup) { create(:group, parent: root_group )}
+
+      context 'under a parent with "Share with group lock" enabled' do
+        let(:root_group) { create(:group, share_with_group_lock: true) }
+
+        it 'enables "Share with group lock" on the subgroup' do
+          expect(subgroup.share_with_group_lock).to be_truthy
+        end
+      end
+
+      context 'under a parent with "Share with group lock" disabled' do
+        let(:root_group) { create(:group) }
+
+        it 'does not enable "Share with group lock" on the subgroup' do
+          expect(subgroup.share_with_group_lock).to be_falsey
+        end
+      end
+    end
+
+    context 'when enabling the parent group "Share with group lock"' do
+      let(:root_group) { create(:group) }
+      let!(:subgroup) { create(:group, parent: root_group )}
+
+      it 'the subgroup "Share with group lock" becomes enabled' do
+        root_group.update!(share_with_group_lock: true)
+
+        expect(subgroup.reload.share_with_group_lock).to be_truthy
+      end
+    end
+
+    context 'when disabling the parent group "Share with group lock" (which was already enabled)' do
+      let(:root_group) { create(:group, share_with_group_lock: true) }
+
+      context 'and the subgroup "Share with group lock" is enabled' do
+        let(:subgroup) { create(:group, parent: root_group, share_with_group_lock: true )}
+
+        it 'the subgroup "Share with group lock" does not change' do
+          root_group.update!(share_with_group_lock: false)
+
+          expect(subgroup.reload.share_with_group_lock).to be_truthy
+        end
+      end
+
+      context 'but the subgroup "Share with group lock" is disabled' do
+        let(:subgroup) { create(:group, parent: root_group )}
+
+        it 'the subgroup "Share with group lock" does not change' do
+          root_group.update!(share_with_group_lock: false)
+
+          expect(subgroup.reload.share_with_group_lock?).to be_falsey
+        end
+      end
+    end
+
+    # Note: Group transfers are not yet implemented
+    context 'when a group is transferred into a root group' do
+      context 'when the root group "Share with group lock" is enabled' do
+        let(:root_group) { create(:group, share_with_group_lock: true) }
+
+        context 'when the subgroup "Share with group lock" is enabled' do
+          let(:subgroup) { create(:group, share_with_group_lock: true )}
+
+          it 'the subgroup "Share with group lock" does not change' do
+            subgroup.parent = root_group
+            subgroup.save!
+
+            expect(subgroup.share_with_group_lock).to be_truthy
+          end
+        end
+
+        context 'when the subgroup "Share with group lock" is disabled' do
+          let(:subgroup) { create(:group)}
+
+          it 'the subgroup "Share with group lock" becomes enabled' do
+            subgroup.parent = root_group
+            subgroup.save!
+
+            expect(subgroup.share_with_group_lock).to be_truthy
+          end
+        end
+      end
+
+      context 'when the root group "Share with group lock" is disabled' do
+        let(:root_group) { create(:group) }
+
+        context 'when the subgroup "Share with group lock" is enabled' do
+          let(:subgroup) { create(:group, share_with_group_lock: true )}
+
+          it 'the subgroup "Share with group lock" does not change' do
+            subgroup.parent = root_group
+            subgroup.save!
+
+            expect(subgroup.share_with_group_lock).to be_truthy
+          end
+        end
+
+        context 'when the subgroup "Share with group lock" is disabled' do
+          let(:subgroup) { create(:group)}
+
+          it 'the subgroup "Share with group lock" does not change' do
+            subgroup.parent = root_group
+            subgroup.save!
+
+            expect(subgroup.share_with_group_lock).to be_falsey
+          end
+        end
+      end
+    end
+  end
+
+  describe '#find_fork_of?' do
+    let(:project) { create(:project, :public) }
+    let!(:forked_project) { fork_project(project, namespace.owner, namespace: namespace) }
+
+    before do
+      # Reset the fork network relation
+      project.reload
+    end
+
+    it 'knows if there is a direct fork in the namespace' do
+      expect(namespace.find_fork_of(project)).to eq(forked_project)
+    end
+
+    it 'knows when there is as fork-of-fork in the namespace' do
+      other_namespace = create(:namespace)
+      other_fork = fork_project(forked_project, other_namespace.owner, namespace: other_namespace)
+
+      expect(other_namespace.find_fork_of(project)).to eq(other_fork)
+    end
+
+    context 'with request store enabled', :request_store do
+      it 'only queries once' do
+        expect(project.fork_network).to receive(:find_forks_in).once.and_call_original
+
+        2.times { namespace.find_fork_of(project) }
+      end
+    end
+  end
+
+  describe "#allowed_path_by_redirects" do
+    let(:namespace1) { create(:namespace, path: 'foo') }
+
+    context "when the path has been taken before" do
+      before do
+        namespace1.path = 'bar'
+        namespace1.save!
+      end
+
+      it 'should be invalid' do
+        namespace2 = build(:group, path: 'foo')
+        expect(namespace2).to be_invalid
+      end
+
+      it 'should return an error on path' do
+        namespace2 = build(:group, path: 'foo')
+        namespace2.valid?
+        expect(namespace2.errors.messages[:path].first).to eq('foo has been taken before. Please use another one')
+      end
+    end
+
+    context "when the path has not been taken before" do
+      it 'should be valid' do
+        expect(RedirectRoute.count).to eq(0)
+        namespace = build(:namespace)
+        expect(namespace).to be_valid
+      end
+    end
   end
 end

@@ -5,8 +5,7 @@
 # Consider using an extra worker if you need to add any extra (and potentially
 # slow) processing of commits.
 class ProcessCommitWorker
-  include Sidekiq::Worker
-  include DedicatedSidekiqQueue
+  include ApplicationWorker
 
   # project_id - The ID of the project this commit belongs to.
   # user_id - The ID of the user that pushed the commit.
@@ -47,8 +46,8 @@ class ProcessCommitWorker
     # therefor we use IssueCollection here and skip the authorization check in
     # Issues::CloseService#execute.
     IssueCollection.new(issues).updatable_by_user(user).each do |issue|
-      Issues::CloseService.new(project, author).
-        close_issue(issue, commit: commit)
+      Issues::CloseService.new(project, author)
+        .close_issue(issue, commit: commit)
     end
   end
 
@@ -57,8 +56,8 @@ class ProcessCommitWorker
 
     return if mentioned_issues.empty?
 
-    Issue::Metrics.where(issue_id: mentioned_issues.map(&:id), first_mentioned_in_commit_at: nil).
-      update_all(first_mentioned_in_commit_at: commit.committed_date)
+    Issue::Metrics.where(issue_id: mentioned_issues.map(&:id), first_mentioned_in_commit_at: nil)
+      .update_all(first_mentioned_in_commit_at: commit.committed_date)
   end
 
   def build_commit(project, hash)

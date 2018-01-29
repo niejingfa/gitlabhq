@@ -1,32 +1,25 @@
 /* eslint-disable func-names, space-before-function-paren, no-var, prefer-rest-params, wrap-iife, one-var, no-underscore-dangle, one-var-declaration-per-line, object-shorthand, no-unused-vars, no-new, comma-dangle, consistent-return, quotes, dot-notation, quote-props, prefer-arrow-callback, max-len */
-/* global Flash */
-
 import 'vendor/jquery.waitforimages';
-import '~/lib/utils/text_utility';
-import './flash';
-import './task_list';
+import { addDelimiter } from './lib/utils/text_utility';
+import Flash from './flash';
+import TaskList from './task_list';
 import CreateMergeRequestDropdown from './create_merge_request_dropdown';
+import IssuablesHelper from './helpers/issuables_helper';
 
-class Issue {
+export default class Issue {
   constructor() {
-    if ($('a.btn-close').length) {
-      this.taskList = new gl.TaskList({
-        dataType: 'issue',
-        fieldName: 'description',
-        selector: '.detail-page-description',
-        onSuccess: (result) => {
-          document.querySelector('#task_status').innerText = result.task_status;
-          document.querySelector('#task_status_short').innerText = result.task_status_short;
-        }
-      });
-      this.initIssueBtnEventListeners();
-    }
+    if ($('a.btn-close').length) this.initIssueBtnEventListeners();
 
     Issue.$btnNewBranch = $('#new-branch');
     Issue.createMrDropdownWrap = document.querySelector('.create-mr-dropdown-wrap');
 
     Issue.initMergeRequests();
     Issue.initRelatedBranches();
+
+    this.closeButtons = $('a.btn-close');
+    this.reopenButtons = $('a.btn-reopen');
+
+    this.initCloseReopenReport();
 
     if (Issue.createMrDropdownWrap) {
       this.createMergeRequestDropdown = new CreateMergeRequestDropdown(Issue.createMrDropdownWrap);
@@ -35,13 +28,8 @@ class Issue {
 
   initIssueBtnEventListeners() {
     const issueFailMessage = 'Unable to update this issue at this time.';
-    const closeButtons = $('a.btn-close');
-    const isClosedBadge = $('div.status-box-closed');
-    const isOpenBadge = $('div.status-box-open');
-    const projectIssuesCounter = $('.issue_counter');
-    const reopenButtons = $('a.btn-reopen');
 
-    return closeButtons.add(reopenButtons).on('click', (e) => {
+    return $(document).on('click', '.js-issuable-actions a.btn-close, .js-issuable-actions a.btn-reopen', (e) => {
       var $button, shouldSubmit, url;
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -50,7 +38,9 @@ class Issue {
       if (shouldSubmit) {
         Issue.submitNoteForm($button.closest('form'));
       }
-      $button.prop('disabled', true);
+
+      this.disableCloseReopenButton($button);
+
       url = $button.attr('href');
       return $.ajax({
         type: 'PUT',
@@ -58,18 +48,21 @@ class Issue {
       })
       .fail(() => new Flash(issueFailMessage))
       .done((data) => {
-        if ('id' in data) {
-          $(document).trigger('issuable:change');
+        const isClosedBadge = $('div.status-box-issue-closed');
+        const isOpenBadge = $('div.status-box-open');
+        const projectIssuesCounter = $('.issue_counter');
 
+        if ('id' in data) {
           const isClosed = $button.hasClass('btn-close');
-          closeButtons.toggleClass('hidden', isClosed);
-          reopenButtons.toggleClass('hidden', !isClosed);
           isClosedBadge.toggleClass('hidden', !isClosed);
           isOpenBadge.toggleClass('hidden', isClosed);
 
-          let numProjectIssues = Number(projectIssuesCounter.text().replace(/[^\d]/, ''));
+          $(document).trigger('issuable:change', isClosed);
+          this.toggleCloseReopenButton(isClosed);
+
+          let numProjectIssues = Number(projectIssuesCounter.first().text().trim().replace(/[^\d]/, ''));
           numProjectIssues = isClosed ? numProjectIssues - 1 : numProjectIssues + 1;
-          projectIssuesCounter.text(gl.text.addDelimiter(numProjectIssues));
+          projectIssuesCounter.text(addDelimiter(numProjectIssues));
 
           if (this.createMergeRequestDropdown) {
             if (isClosed) {
@@ -83,16 +76,38 @@ class Issue {
         } else {
           new Flash(issueFailMessage);
         }
-
-        $button.prop('disabled', false);
+      })
+      .then(() => {
+        this.disableCloseReopenButton($button, false);
       });
     });
+  }
+
+  initCloseReopenReport() {
+    this.closeReopenReportToggle = IssuablesHelper.initCloseReopenReport();
+
+    if (this.closeButtons) this.closeButtons = this.closeButtons.not('.issuable-close-button');
+    if (this.reopenButtons) this.reopenButtons = this.reopenButtons.not('.issuable-close-button');
+  }
+
+  disableCloseReopenButton($button, shouldDisable) {
+    if (this.closeReopenReportToggle) {
+      this.closeReopenReportToggle.setDisable(shouldDisable);
+    } else {
+      $button.prop('disabled', shouldDisable);
+    }
+  }
+
+  toggleCloseReopenButton(isClosed) {
+    if (this.closeReopenReportToggle) this.closeReopenReportToggle.updateButton(isClosed);
+    this.closeButtons.toggleClass('hidden', isClosed);
+    this.reopenButtons.toggleClass('hidden', !isClosed);
   }
 
   static submitNoteForm(form) {
     var noteText;
     noteText = form.find("textarea.js-note-text").val();
-    if (noteText.trim().length > 0) {
+    if (noteText && noteText.trim().length > 0) {
       return form.submit();
     }
   }
@@ -121,5 +136,3 @@ class Issue {
     });
   }
 }
-
-export default Issue;

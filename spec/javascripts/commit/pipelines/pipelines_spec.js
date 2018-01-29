@@ -1,17 +1,19 @@
+import _ from 'underscore';
 import Vue from 'vue';
-import PipelinesTable from '~/commit/pipelines/pipelines_table';
+import pipelinesTable from '~/commit/pipelines/pipelines_table.vue';
 
 describe('Pipelines table in Commits and Merge requests', () => {
   const jsonFixtureName = 'pipelines/pipelines.json';
   let pipeline;
+  let PipelinesTable;
 
-  preloadFixtures('static/pipelines_table.html.raw');
   preloadFixtures(jsonFixtureName);
 
   beforeEach(() => {
-    loadFixtures('static/pipelines_table.html.raw');
     const pipelines = getJSONFixture(jsonFixtureName).pipelines;
-    pipeline = pipelines.find(p => p.id === 1);
+
+    PipelinesTable = Vue.extend(pipelinesTable);
+    pipeline = pipelines.find(p => p.user !== null && p.commit !== null);
   });
 
   describe('successful request', () => {
@@ -26,8 +28,14 @@ describe('Pipelines table in Commits and Merge requests', () => {
         Vue.http.interceptors.push(pipelinesEmptyResponse);
 
         this.component = new PipelinesTable({
-          el: document.querySelector('#commit-pipeline-table-view'),
-        });
+          propsData: {
+            endpoint: 'endpoint',
+            helpPagePath: 'foo',
+            emptyStateSvgPath: 'foo',
+            errorStateSvgPath: 'foo',
+            autoDevopsHelpPath: 'foo',
+          },
+        }).$mount();
       });
 
       afterEach(function () {
@@ -58,8 +66,14 @@ describe('Pipelines table in Commits and Merge requests', () => {
         Vue.http.interceptors.push(pipelinesResponse);
 
         this.component = new PipelinesTable({
-          el: document.querySelector('#commit-pipeline-table-view'),
-        });
+          propsData: {
+            endpoint: 'endpoint',
+            helpPagePath: 'foo',
+            emptyStateSvgPath: 'foo',
+            errorStateSvgPath: 'foo',
+            autoDevopsHelpPath: 'foo',
+          },
+        }).$mount();
       });
 
       afterEach(() => {
@@ -79,6 +93,44 @@ describe('Pipelines table in Commits and Merge requests', () => {
         }, 0);
       });
     });
+
+    describe('pipeline badge counts', () => {
+      const pipelinesResponse = (request, next) => {
+        next(request.respondWith(JSON.stringify([pipeline]), {
+          status: 200,
+        }));
+      };
+
+      beforeEach(() => {
+        Vue.http.interceptors.push(pipelinesResponse);
+      });
+
+      afterEach(() => {
+        Vue.http.interceptors = _.without(Vue.http.interceptors, pipelinesResponse);
+        this.component.$destroy();
+      });
+
+      it('should receive update-pipelines-count event', (done) => {
+        const element = document.createElement('div');
+        document.body.appendChild(element);
+
+        element.addEventListener('update-pipelines-count', (event) => {
+          expect(event.detail.pipelines).toEqual([pipeline]);
+          done();
+        });
+
+        this.component = new PipelinesTable({
+          propsData: {
+            endpoint: 'endpoint',
+            helpPagePath: 'foo',
+            emptyStateSvgPath: 'foo',
+            errorStateSvgPath: 'foo',
+            autoDevopsHelpPath: 'foo',
+          },
+        }).$mount();
+        element.appendChild(this.component.$el);
+      });
+    });
   });
 
   describe('unsuccessfull request', () => {
@@ -92,8 +144,14 @@ describe('Pipelines table in Commits and Merge requests', () => {
       Vue.http.interceptors.push(pipelinesErrorResponse);
 
       this.component = new PipelinesTable({
-        el: document.querySelector('#commit-pipeline-table-view'),
-      });
+        propsData: {
+          endpoint: 'endpoint',
+          helpPagePath: 'foo',
+          emptyStateSvgPath: 'foo',
+          errorStateSvgPath: 'foo',
+          autoDevopsHelpPath: 'foo',
+        },
+      }).$mount();
     });
 
     afterEach(function () {

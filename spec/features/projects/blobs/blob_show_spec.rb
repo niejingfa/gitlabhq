@@ -1,10 +1,12 @@
 require 'spec_helper'
 
-feature 'File blob', :js, feature: true do
-  let(:project) { create(:project, :public) }
+feature 'File blob', :js do
+  include MobileHelpers
+
+  let(:project) { create(:project, :public, :repository) }
 
   def visit_blob(path, anchor: nil, ref: 'master')
-    visit namespace_project_blob_path(project.namespace, project, File.join(ref, path), anchor: anchor)
+    visit project_blob_path(project, File.join(ref, path), anchor: anchor)
 
     wait_for_requests
   end
@@ -29,6 +31,16 @@ feature 'File blob', :js, feature: true do
         # shows a raw button
         expect(page).to have_link('Open raw')
       end
+    end
+
+    it 'displays file actions on all screen sizes' do
+      file_actions_selector = '.file-actions'
+
+      resize_screen_sm
+      expect(page).to have_selector(file_actions_selector, visible: true)
+
+      resize_screen_xs
+      expect(page).to have_selector(file_actions_selector, visible: true)
     end
   end
 

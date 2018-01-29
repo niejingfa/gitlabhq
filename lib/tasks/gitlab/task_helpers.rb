@@ -1,10 +1,15 @@
 require 'rainbow/ext/string'
+require 'gitlab/utils/strong_memoize'
 
 module Gitlab
   TaskFailedError = Class.new(StandardError)
   TaskAbortedByUserError = Class.new(StandardError)
 
   module TaskHelpers
+    include Gitlab::Utils::StrongMemoize
+
+    extend self
+
     # Ask if the user wants to continue
     #
     # Returns "yes" the user chose to continue
@@ -102,17 +107,17 @@ module Gitlab
       Gitlab.config.gitlab.user
     end
 
-    def is_gitlab_user?
-      return @is_gitlab_user unless @is_gitlab_user.nil?
-
-      current_user = run_command(%w(whoami)).chomp
-      @is_gitlab_user = current_user == gitlab_user
+    def gitlab_user?
+      strong_memoize(:is_gitlab_user) do
+        current_user = run_command(%w(whoami)).chomp
+        current_user == gitlab_user
+      end
     end
 
     def warn_user_is_not_gitlab
-      return if @warned_user_not_gitlab
+      return if gitlab_user?
 
-      unless is_gitlab_user?
+      strong_memoize(:warned_user_not_gitlab) do
         current_user = run_command(%w(whoami)).chomp
 
         puts " Warning ".color(:black).background(:yellow)
@@ -120,14 +125,12 @@ module Gitlab
         puts "  Things may work\/fail for the wrong reasons."
         puts "  For correct results you should run this as user #{gitlab_user.color(:magenta)}."
         puts ""
-
-        @warned_user_not_gitlab = true
       end
     end
 
     def all_repos
       Gitlab.config.repositories.storages.each_value do |repository_storage|
-        IO.popen(%W(find #{repository_storage['path']} -mindepth 2 -maxdepth 2 -type d -name *.git)) do |find|
+        IO.popen(%W(find #{repository_storage['path']} -mindepth 2 -type d -name *.git)) do |find|
           find.each_line do |path|
             yield path.chomp
           end
@@ -153,7 +156,6 @@ module Gitlab
 
       clone_repo(repo, target_dir) unless Dir.exist?(target_dir)
       checkout_version(version, target_dir)
-      reset_to_version(version, target_dir)
     end
 
     def clone_repo(repo, target_dir)
@@ -161,12 +163,8 @@ module Gitlab
     end
 
     def checkout_version(version, target_dir)
-      run_command!(%W[#{Gitlab.config.git.bin_path} -C #{target_dir} fetch --quiet])
-      run_command!(%W[#{Gitlab.config.git.bin_path} -C #{target_dir} checkout --quiet #{version}])
-    end
-
-    def reset_to_version(version, target_dir)
-      run_command!(%W[#{Gitlab.config.git.bin_path} -C #{target_dir} reset --hard #{version}])
+      run_command!(%W[#{Gitlab.config.git.bin_path} -C #{target_dir} fetch --quiet origin #{version}])
+      run_command!(%W[#{Gitlab.config.git.bin_path} -C #{target_dir} checkout -f --quiet FETCH_HEAD --])
     end
   end
 end

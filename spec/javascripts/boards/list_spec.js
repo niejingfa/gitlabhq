@@ -1,35 +1,36 @@
 /* eslint-disable comma-dangle */
-/* global boardsMockInterceptor */
 /* global BoardService */
 /* global List */
 /* global ListIssue */
-/* global listObj */
-/* global listObjDuplicate */
 
-import Vue from 'vue';
-
-import '~/lib/utils/url_utility';
+import MockAdapter from 'axios-mock-adapter';
+import axios from '~/lib/utils/axios_utils';
+import _ from 'underscore';
 import '~/boards/models/issue';
 import '~/boards/models/label';
 import '~/boards/models/list';
 import '~/boards/models/assignee';
 import '~/boards/services/board_service';
 import '~/boards/stores/boards_store';
-import './mock_data';
+import { listObj, listObjDuplicate, boardsMockInterceptor, mockBoardService } from './mock_data';
 
 describe('List model', () => {
   let list;
+  let mock;
 
   beforeEach(() => {
-    Vue.http.interceptors.push(boardsMockInterceptor);
-    gl.boardService = new BoardService('/test/issue-boards/board', '', '1');
+    mock = new MockAdapter(axios);
+    mock.onAny().reply(boardsMockInterceptor);
+    gl.boardService = mockBoardService({
+      bulkUpdatePath: '/test/issue-boards/board/1/lists',
+    });
     gl.issueBoards.BoardsStore.create();
 
     list = new List(listObj);
   });
 
   afterEach(() => {
-    Vue.http.interceptors = _.without(Vue.http.interceptors, boardsMockInterceptor);
+    mock.restore();
   });
 
   it('gets issues when created', (done) => {
@@ -92,6 +93,7 @@ describe('List model', () => {
     const listDup = new List(listObjDuplicate);
     const issue = new ListIssue({
       title: 'Testing',
+      id: _.random(10000),
       iid: _.random(10000),
       confidential: false,
       labels: [list.label, listDup.label],
@@ -118,6 +120,7 @@ describe('List model', () => {
       for (let i = 0; i < 30; i += 1) {
         list.issues.push(new ListIssue({
           title: 'Testing',
+          id: _.random(10000) + i,
           iid: _.random(10000) + i,
           confidential: false,
           labels: [list.label],
@@ -137,7 +140,7 @@ describe('List model', () => {
     it('does not increase page number if issue count is less than the page size', () => {
       list.issues.push(new ListIssue({
         title: 'Testing',
-        iid: _.random(10000),
+        id: _.random(10000),
         confidential: false,
         labels: [list.label],
         assignees: [],
@@ -148,6 +151,41 @@ describe('List model', () => {
 
       expect(list.page).toBe(1);
       expect(list.getIssues).toHaveBeenCalled();
+    });
+  });
+
+  describe('newIssue', () => {
+    beforeEach(() => {
+      spyOn(gl.boardService, 'newIssue').and.returnValue(Promise.resolve({
+        data: {
+          id: 42,
+        },
+      }));
+    });
+
+    it('adds new issue to top of list', (done) => {
+      list.issues.push(new ListIssue({
+        title: 'Testing',
+        id: _.random(10000),
+        confidential: false,
+        labels: [list.label],
+        assignees: [],
+      }));
+      const dummyIssue = new ListIssue({
+        title: 'new issue',
+        id: _.random(10000),
+        confidential: false,
+        labels: [list.label],
+        assignees: [],
+      });
+
+      list.newIssue(dummyIssue)
+        .then(() => {
+          expect(list.issues.length).toBe(2);
+          expect(list.issues[0]).toBe(dummyIssue);
+        })
+        .then(done)
+        .catch(done.fail);
     });
   });
 });

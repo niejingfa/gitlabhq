@@ -1,14 +1,23 @@
 module TreeHelper
+  FILE_LIMIT = 1_000
+
   # Sorts a repository's tree so that folders are before files and renders
   # their corresponding partials
   #
-  # contents - A Grit::Tree object for the current tree
+  # tree - A `Tree` object for the current tree
   def render_tree(tree)
     # Sort submodules and folders together by name ahead of files
     folders, files, submodules = tree.trees, tree.blobs, tree.submodules
-    tree = ""
+    tree = ''
     items = (folders + submodules).sort_by(&:name) + files
-    tree << render(partial: "projects/tree/tree_row", collection: items) if items.present?
+
+    if items.size > FILE_LIMIT
+      tree << render(partial: 'projects/tree/truncated_notice_tree_row',
+                     locals: { limit: FILE_LIMIT, total: items.size })
+      items = items.take(FILE_LIMIT)
+    end
+
+    tree << render(partial: 'projects/tree/tree_row', collection: items) if items.present?
     tree.html_safe
   end
 
@@ -88,6 +97,7 @@ module TreeHelper
         part_path = part if part_path.empty?
 
         next if parts.count > max_links && !parts.last(2).include?(part)
+
         yield(part, part_path)
       end
     end
@@ -99,10 +109,12 @@ module TreeHelper
   end
 
   # returns the relative path of the first subdir that doesn't have only one directory descendant
-  def flatten_tree(tree)
+  def flatten_tree(root_path, tree)
+    return tree.flat_path.sub(/\A#{root_path}\//, '') if tree.flat_path.present?
+
     subtree = Gitlab::Git::Tree.where(@repository, @commit.id, tree.path)
     if subtree.count == 1 && subtree.first.dir?
-      return tree_join(tree.name, flatten_tree(subtree.first))
+      return tree_join(tree.name, flatten_tree(root_path, subtree.first))
     else
       return tree.name
     end

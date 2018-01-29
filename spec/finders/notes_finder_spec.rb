@@ -2,10 +2,10 @@ require 'spec_helper'
 
 describe NotesFinder do
   let(:user) { create :user }
-  let(:project) { create(:empty_project) }
+  let(:project) { create(:project) }
 
   before do
-    project.team << [user, :master]
+    project.add_master(user)
   end
 
   describe '#execute' do
@@ -43,7 +43,7 @@ describe NotesFinder do
 
     context 'on restricted projects' do
       let(:project) do
-        create(:empty_project,
+        create(:project,
                :public,
                :issues_private,
                :snippets_private,
@@ -147,7 +147,7 @@ describe NotesFinder do
 
         it 'raises an error for project members with guest role' do
           user = create(:user)
-          project.team << [user, :guest]
+          project.add_guest(user)
 
           expect { described_class.new(project, user, params).execute }.to raise_error(ActiveRecord::RecordNotFound)
         end
@@ -156,7 +156,7 @@ describe NotesFinder do
   end
 
   describe '.search' do
-    let(:project) { create(:empty_project, :public) }
+    let(:project) { create(:project, :public) }
     let(:note) { create(:note_on_issue, note: 'WoW', project: project) }
 
     it 'returns notes with matching content' do
@@ -189,7 +189,7 @@ describe NotesFinder do
 
       it "does not return notes with matching content for project members with guest role" do
         user = create(:user)
-        project.team << [user, :guest]
+        project.add_guest(user)
         expect(described_class.new(confidential_note.project, user, search: confidential_note.note).execute).to be_empty
       end
 

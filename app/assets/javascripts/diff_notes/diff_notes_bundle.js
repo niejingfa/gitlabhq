@@ -16,7 +16,8 @@ import './components/diff_note_avatars';
 import './components/new_issue_for_discussion';
 
 $(() => {
-  const projectPath = document.querySelector('.merge-request').dataset.projectPath;
+  const projectPathHolder = document.querySelector('.merge-request') || document.querySelector('.commit-box');
+  const projectPath = projectPathHolder.dataset.projectPath;
   const COMPONENT_SELECTOR = 'resolve-btn, resolve-discussion-btn, jump-to-discussion, comment-and-resolve-btn, new-issue-for-discussion-btn';
 
   window.gl = window.gl || {};
@@ -32,6 +33,10 @@ $(() => {
       const tmpApp = new tmp().$mount();
 
       $(this).replaceWith(tmpApp.$el);
+      $(tmpApp.$el).one('remove.vue', () => {
+        tmpApp.$destroy();
+        tmpApp.$el.remove();
+      });
     });
 
     const $components = $(COMPONENT_SELECTOR).filter(function () {
@@ -42,6 +47,10 @@ $(() => {
       $components.each(function () {
         const $this = $(this);
         const noteId = $this.attr(':note-id');
+        const discussionId = $this.attr(':discussion-id');
+
+        if ($this.is('comment-and-resolve-btn') && !discussionId) return;
+
         const tmp = Vue.extend({
           template: $this.get(0).outerHTML
         });

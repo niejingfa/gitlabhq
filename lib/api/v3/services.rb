@@ -395,6 +395,26 @@ module API
             desc: 'The Slack token'
           }
         ],
+        'packagist' => [
+          {
+            required: true,
+            name: :username,
+            type: String,
+            desc: 'The username'
+          },
+          {
+            required: true,
+            name: :token,
+            type: String,
+            desc: 'The Packagist API token'
+          },
+          {
+            required: false,
+            name: :server,
+            type: String,
+            desc: 'The server'
+          }
+        ],
         'pipelines-email' => [
           {
             required: true,
@@ -602,13 +622,13 @@ module API
         end
         get ":id/services/:service_slug" do
           service = user_project.find_or_initialize_service(params[:service_slug].underscore)
-          present service, with: Entities::ProjectService, include_passwords: current_user.admin?
+          present service, with: Entities::ProjectService
         end
       end
 
       trigger_services.each do |service_slug, settings|
         helpers do
-          def chat_command_service(project, service_slug, params)
+          def slash_command_service(project, service_slug, params)
             project.services.active.where(template: false).find do |service|
               service.try(:token) == params[:token] && service.to_param == service_slug.underscore
             end
@@ -633,7 +653,7 @@ module API
             # This is not accurate, but done to prevent leakage of the project names
             not_found!('Service') unless project
 
-            service = chat_command_service(project, service_slug, params)
+            service = slash_command_service(project, service_slug, params)
             result = service.try(:trigger, params)
 
             if result

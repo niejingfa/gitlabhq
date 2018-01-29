@@ -4,6 +4,7 @@ module Gitlab
   class GitAccess
     UnauthorizedError = Class.new(StandardError)
     NotFoundError = Class.new(StandardError)
+    ProjectMovedError = Class.new(NotFoundError)
 
     ERROR_MESSAGES = {
       upload: 'You are not allowed to upload code for this project.',
@@ -15,26 +16,31 @@ module Gitlab
       account_blocked: 'Your account has been blocked.',
       command_not_allowed: "The command you're trying to execute is not allowed.",
       upload_pack_disabled_over_http: 'Pulling over HTTP is not allowed.',
-      receive_pack_disabled_over_http: 'Pushing over HTTP is not allowed.'
+      receive_pack_disabled_over_http: 'Pushing over HTTP is not allowed.',
+      read_only: 'The repository is temporarily read-only. Please try again later.',
+      cannot_push_to_read_only: "You can't push code to a read-only GitLab instance."
     }.freeze
 
     DOWNLOAD_COMMANDS = %w{ git-upload-pack git-upload-archive }.freeze
     PUSH_COMMANDS = %w{ git-receive-pack }.freeze
     ALL_COMMANDS = DOWNLOAD_COMMANDS + PUSH_COMMANDS
 
-    attr_reader :actor, :project, :protocol, :authentication_abilities
+    attr_reader :actor, :project, :protocol, :authentication_abilities, :redirected_path
 
-    def initialize(actor, project, protocol, authentication_abilities:)
+    def initialize(actor, project, protocol, authentication_abilities:, redirected_path: nil)
       @actor    = actor
       @project  = project
       @protocol = protocol
+      @redirected_path = redirected_path
       @authentication_abilities = authentication_abilities
     end
 
     def check(cmd, changes)
       check_protocol!
+      check_valid_actor!
       check_active_user!
       check_project_accessibility!
+      check_project_moved!
       check_command_disabled!(cmd)
       check_command_existence!(cmd)
       check_repository_existence!
@@ -67,6 +73,14 @@ module Gitlab
 
     private
 
+    def check_valid_actor!
+      return unless actor.is_a?(Key)
+
+      unless actor.valid?
+        raise UnauthorizedError, "Your SSH key #{actor.errors[:key].first}."
+      end
+    end
+
     def check_protocol!
       unless protocol_allowed?
         raise UnauthorizedError, "Git access over #{protocol.upcase} is not allowed"
@@ -84,6 +98,18 @@ module Gitlab
     def check_project_accessibility!
       if project.blank? || !can_read_project?
         raise NotFoundError, ERROR_MESSAGES[:project_not_found]
+      end
+    end
+
+    def check_project_moved!
+      return if redirected_path.nil?
+
+      project_moved = Checks::ProjectMoved.new(project, user, redirected_path, protocol)
+
+      if project_moved.permanent_redirect?
+        project_moved.add_redirect_message
+      else
+        raise ProjectMovedError, project_moved.redirect_message(rejected: true)
       end
     end
 
@@ -132,6 +158,14 @@ module Gitlab
     end
 
     def check_push_access!(changes)
+      if project.repository_read_only?
+        raise UnauthorizedError, ERROR_MESSAGES[:read_only]
+      end
+
+      if Gitlab::Database.read_only?
+        raise UnauthorizedError, push_to_read_only_message
+      end
+
       if deploy_key
         check_deploy_key_push_access!
       elsif user
@@ -176,10 +210,6 @@ module Gitlab
         skip_authorization: deploy_key?,
         protocol: protocol
       ).exec
-    end
-
-    def matching_merge_request?(newrev, branch_name)
-      Checks::MatchingMergeRequest.new(newrev, branch_name, project).match?
     end
 
     def deploy_key
@@ -246,6 +276,10 @@ module Gitlab
                        else
                          UserAccess.new(user, project: project)
                        end
+    end
+
+    def push_to_read_only_message
+      ERROR_MESSAGES[:cannot_push_to_read_only]
     end
   end
 end

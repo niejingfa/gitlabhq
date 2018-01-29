@@ -5,7 +5,7 @@ describe Projects::MergeRequestsController, '(JavaScript fixtures)', type: :cont
 
   let(:admin) { create(:admin) }
   let(:namespace) { create(:namespace, name: 'frontend-fixtures' )}
-  let(:project) { create(:project, namespace: namespace, path: 'merge-requests-project') }
+  let(:project) { create(:project, :repository, namespace: namespace, path: 'merge-requests-project') }
   let(:merge_request) { create(:merge_request, :with_diffs, source_project: project, target_project: project, description: '- [ ] Task List Item') }
   let(:merged_merge_request) { create(:merge_request, :merged, source_project: project, target_project: project) }
   let(:pipeline) do
@@ -33,8 +33,18 @@ describe Projects::MergeRequestsController, '(JavaScript fixtures)', type: :cont
     clean_frontend_fixtures('merge_requests/')
   end
 
-  before(:each) do
+  before do
     sign_in(admin)
+  end
+
+  after do
+    remove_repository(project)
+  end
+
+  it 'merge_requests/merge_request_of_current_user.html.raw' do |example|
+    merge_request.update(author: admin)
+
+    render_merge_request(example.description, merge_request)
   end
 
   it 'merge_requests/merge_request_with_task_list.html.raw' do |example|
@@ -55,13 +65,19 @@ describe Projects::MergeRequestsController, '(JavaScript fixtures)', type: :cont
     render_merge_request(example.description, merge_request)
   end
 
+  it 'merge_requests/merge_request_with_comment.html.raw' do |example|
+    create(:note_on_merge_request, author: admin, project: project, noteable: merge_request, note: '- [ ] Task List Item')
+    render_merge_request(example.description, merge_request)
+  end
+
   private
 
   def render_merge_request(fixture_file_name, merge_request)
     get :show,
       namespace_id: project.namespace.to_param,
       project_id: project,
-      id: merge_request.to_param
+      id: merge_request.to_param,
+      format: :html
 
     expect(response).to be_success
     store_frontend_fixture(response, fixture_file_name)

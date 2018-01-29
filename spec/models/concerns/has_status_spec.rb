@@ -48,7 +48,7 @@ describe HasStatus do
           [create(type, status: :failed, allow_failure: true)]
         end
 
-        it { is_expected.to eq 'skipped' }
+        it { is_expected.to eq 'success' }
       end
 
       context 'success and canceled' do
@@ -168,8 +168,8 @@ describe HasStatus do
 
           describe ".#{status}" do
             it 'contains the job' do
-              expect(CommitStatus.public_send(status).all).
-                to contain_exactly(job)
+              expect(CommitStatus.public_send(status).all)
+                .to contain_exactly(job)
             end
           end
 
@@ -227,6 +227,18 @@ describe HasStatus do
       end
 
       %i[created failed success].each do |status|
+        it_behaves_like 'not containing the job', status
+      end
+    end
+
+    describe '.alive' do
+      subject { CommitStatus.alive }
+
+      %i[running pending created].each do |status|
+        it_behaves_like 'containing the job', status
+      end
+
+      %i[failed success].each do |status|
         it_behaves_like 'not containing the job', status
       end
     end

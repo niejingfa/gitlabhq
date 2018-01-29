@@ -1,9 +1,9 @@
 require 'digest/md5'
 
 class Key < ActiveRecord::Base
+  include Gitlab::CurrentSettings
+  include AfterCommitQueue
   include Sortable
-
-  LAST_USED_AT_REFRESH_TIME = 1.day.to_i
 
   belongs_to :user
 
@@ -12,27 +12,32 @@ class Key < ActiveRecord::Base
   validates :title,
     presence: true,
     length: { maximum: 255 }
+
   validates :key,
     presence: true,
     length: { maximum: 5000 },
     format: { with: /\A(ssh|ecdsa)-.*\Z/ }
-  validates :key,
-    format: { without: /\n|\r/, message: 'should be a single line' }
+
   validates :fingerprint,
     uniqueness: true,
     presence: { message: 'cannot be generated' }
 
+  validate :key_meets_restrictions
+
   delegate :name, :email, to: :user, prefix: true
 
   after_commit :add_to_shell, on: :create
-  after_commit :notify_user, on: :create
   after_create :post_create_hook
+  after_create :refresh_user_cache
   after_commit :remove_from_shell, on: :destroy
   after_destroy :post_destroy_hook
+  after_destroy :refresh_user_cache
 
   def key=(value)
+    value&.delete!("\n\r")
     value.strip! unless value.blank?
     write_attribute(:key, value)
+    @public_key = nil
   end
 
   def publishable_key
@@ -51,10 +56,7 @@ class Key < ActiveRecord::Base
   end
 
   def update_last_used_at
-    lease = Gitlab::ExclusiveLease.new("key_update_last_used_at:#{id}", timeout: LAST_USED_AT_REFRESH_TIME)
-    return unless lease.try_obtain
-
-    UseKeyWorker.perform_async(id)
+    Keys::LastUsedService.new(self).execute
   end
 
   def add_to_shell
@@ -77,8 +79,18 @@ class Key < ActiveRecord::Base
     )
   end
 
+  def refresh_user_cache
+    return unless user
+
+    Users::KeysCountService.new(user).refresh_cache
+  end
+
   def post_destroy_hook
     SystemHooksService.new.execute_hooks_for(self, :destroy)
+  end
+
+  def public_key
+    @public_key ||= Gitlab::SSHPublicKey.new(key)
   end
 
   private
@@ -88,10 +100,26 @@ class Key < ActiveRecord::Base
 
     return unless self.key.present?
 
-    self.fingerprint = Gitlab::KeyFingerprint.new(self.key).fingerprint
+    self.fingerprint = public_key.fingerprint
   end
 
-  def notify_user
-    NotificationService.new.new_key(self)
+  def key_meets_restrictions
+    restriction = current_application_settings.key_restriction_for(public_key.type)
+
+    if restriction == ApplicationSetting::FORBIDDEN_KEY_VALUE
+      errors.add(:key, forbidden_key_type_message)
+    elsif public_key.bits < restriction
+      errors.add(:key, "must be at least #{restriction} bits")
+    end
+  end
+
+  def forbidden_key_type_message
+    allowed_types =
+      current_application_settings
+        .allowed_key_types
+        .map(&:upcase)
+        .to_sentence(last_word_connector: ', or ', two_words_connector: ' or ')
+
+    "type is forbidden. Must be #{allowed_types}"
   end
 end

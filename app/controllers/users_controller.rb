@@ -1,5 +1,6 @@
 class UsersController < ApplicationController
   include RoutableActions
+  include RendersMemberAccess
 
   skip_before_action :authenticate_user!
   before_action :user, except: [:exists]
@@ -73,10 +74,7 @@ class UsersController < ApplicationController
   end
 
   def calendar
-    calendar = contributions_calendar
-    @activity_dates = calendar.activity_dates
-
-    render 'calendar', layout: false
+    render json: contributions_calendar.activity_dates
   end
 
   def calendar_activities
@@ -106,25 +104,33 @@ class UsersController < ApplicationController
 
   def load_events
     # Get user activity feed for projects common for both users
-    @events = user.recent_events.
-      merge(projects_for_current_user).
-      references(:project).
-      with_associations.
-      limit_recent(20, params[:offset])
+    @events = user.recent_events
+      .merge(projects_for_current_user)
+      .references(:project)
+      .with_associations
+      .limit_recent(20, params[:offset])
+
+    Events::RenderService.new(current_user).execute(@events, atom_request: request.format.atom?)
   end
 
   def load_projects
     @projects =
       PersonalProjectsFinder.new(user).execute(current_user)
       .page(params[:page])
+
+    prepare_projects_for_rendering(@projects)
   end
 
   def load_contributed_projects
     @contributed_projects = contributed_projects.joined(user)
+
+    prepare_projects_for_rendering(@contributed_projects)
   end
 
   def load_groups
     @groups = JoinedGroupsFinder.new(user).execute(current_user)
+
+    prepare_groups_for_rendering(@groups)
   end
 
   def load_snippets

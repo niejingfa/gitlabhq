@@ -1,22 +1,31 @@
-/* global Flash */
-
+import Flash from '../../../flash';
 import AssigneeTitle from './assignee_title';
 import Assignees from './assignees';
-
 import Store from '../../stores/sidebar_store';
-import Mediator from '../../sidebar_mediator';
-
 import eventHub from '../../event_hub';
 
 export default {
   name: 'SidebarAssignees',
   data() {
     return {
-      mediator: new Mediator(),
       store: new Store(),
       loading: false,
-      field: '',
     };
+  },
+  props: {
+    mediator: {
+      type: Object,
+      required: true,
+    },
+    field: {
+      type: String,
+      required: true,
+    },
+    signedIn: {
+      type: Boolean,
+      required: false,
+      default: false,
+    },
   },
   components: {
     'assignee-title': AssigneeTitle,
@@ -62,15 +71,13 @@ export default {
     eventHub.$off('sidebar.removeAllAssignees', this.removeAllAssignees);
     eventHub.$off('sidebar.saveAssignees', this.saveAssignees);
   },
-  beforeMount() {
-    this.field = this.$el.dataset.field;
-  },
   template: `
     <div>
       <assignee-title
         :number-of-assignees="store.assignees.length"
         :loading="loading || store.isFetching.assignees"
         :editable="store.editable"
+        :show-toggle="!signedIn"
       />
       <assignees
         v-if="!store.isFetching.assignees"

@@ -1,3 +1,4 @@
+# :nocov:
 module DeliverNever
   def deliver_later
     self
@@ -8,6 +9,7 @@ module Gitlab
   class Seeder
     def self.quiet
       mute_mailer
+
       SeedFu.quiet = true
 
       yield
@@ -21,3 +23,4 @@ module Gitlab
     end
   end
 end
+# :nocov:

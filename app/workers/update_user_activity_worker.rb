@@ -1,14 +1,13 @@
 class UpdateUserActivityWorker
-  include Sidekiq::Worker
-  include DedicatedSidekiqQueue
+  include ApplicationWorker
 
   def perform(pairs)
     pairs = cast_data(pairs)
     ids = pairs.keys
     conditions = 'WHEN id = ? THEN ? ' * ids.length
 
-    User.where(id: ids).
-      update_all([
+    User.where(id: ids)
+      .update_all([
         "last_activity_on = CASE #{conditions} ELSE last_activity_on END",
         *pairs.to_a.flatten
       ])

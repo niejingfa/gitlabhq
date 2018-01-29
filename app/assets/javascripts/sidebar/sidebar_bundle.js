@@ -1,22 +1,11 @@
-import Vue from 'vue';
-import sidebarTimeTracking from './components/time_tracking/sidebar_time_tracking';
-import sidebarAssignees from './components/assignees/sidebar_assignees';
-
 import Mediator from './sidebar_mediator';
+import { mountSidebar, getSidebarOptions } from './mount_sidebar';
 
 function domContentLoaded() {
-  const mediator = new Mediator(gl.sidebarOptions);
+  const mediator = new Mediator(getSidebarOptions());
   mediator.fetch();
 
-  const sidebarAssigneesEl = document.querySelector('#js-vue-sidebar-assignees');
-
-  // Only create the sidebarAssignees vue app if it is found in the DOM
-  // We currently do not use sidebarAssignees for the MR page
-  if (sidebarAssigneesEl) {
-    new Vue(sidebarAssignees).$mount(sidebarAssigneesEl);
-  }
-
-  new Vue(sidebarTimeTracking).$mount('#issuable-time-tracker');
+  mountSidebar(mediator);
 }
 
 document.addEventListener('DOMContentLoaded', domContentLoaded);

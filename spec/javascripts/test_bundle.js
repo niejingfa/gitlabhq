@@ -1,7 +1,28 @@
+/* eslint-disable jasmine/no-global-setup */
 import $ from 'jquery';
-import _ from 'underscore';
 import 'jasmine-jquery';
 import '~/commons';
+
+import Vue from 'vue';
+import VueResource from 'vue-resource';
+
+const isHeadlessChrome = /\bHeadlessChrome\//.test(navigator.userAgent);
+Vue.config.devtools = !isHeadlessChrome;
+Vue.config.productionTip = false;
+
+let hasVueWarnings = false;
+Vue.config.warnHandler = (msg, vm, trace) => {
+  hasVueWarnings = true;
+  fail(`${msg}${trace}`);
+};
+
+let hasVueErrors = false;
+Vue.config.errorHandler = function (err) {
+  hasVueErrors = true;
+  fail(err);
+};
+
+Vue.use(VueResource);
 
 // enable test fixtures
 jasmine.getFixtures().fixturesPath = '/base/spec/javascripts/fixtures';
@@ -9,12 +30,34 @@ jasmine.getJSONFixtures().fixturesPath = '/base/spec/javascripts/fixtures';
 
 // globalize common libraries
 window.$ = window.jQuery = $;
-window._ = _;
 
 // stub expected globals
 window.gl = window.gl || {};
 window.gl.TEST_HOST = 'http://test.host';
 window.gon = window.gon || {};
+
+let hasUnhandledPromiseRejections = false;
+
+window.addEventListener('unhandledrejection', (event) => {
+  hasUnhandledPromiseRejections = true;
+  console.error('Unhandled promise rejection:');
+  console.error(event.reason.stack || event.reason);
+});
+
+// HACK: Chrome 59 disconnects if there are too many synchronous tests in a row
+// because it appears to lock up the thread that communicates to Karma's socket
+// This async beforeEach gets called on every spec and releases the JS thread long
+// enough for the socket to continue to communicate.
+// The downside is that it creates a minor performance penalty in the time it takes
+// to run our unit tests.
+beforeEach(done => done());
+
+const builtinVueHttpInterceptors = Vue.http.interceptors.slice();
+
+beforeEach(() => {
+  // restore interceptors so we have no remaining ones from previous tests
+  Vue.http.interceptors = builtinVueHttpInterceptors.slice();
+});
 
 // render all of our tests
 const testsContext = require.context('.', true, /_spec$/);
@@ -29,6 +72,28 @@ testsContext.keys().forEach(function (path) {
       });
     });
   }
+});
+
+describe('test errors', () => {
+  beforeAll((done) => {
+    if (hasUnhandledPromiseRejections || hasVueWarnings || hasVueErrors) {
+      setTimeout(done, 1000);
+    } else {
+      done();
+    }
+  });
+
+  it('has no unhandled Promise rejections', () => {
+    expect(hasUnhandledPromiseRejections).toBe(false);
+  });
+
+  it('has no Vue warnings', () => {
+    expect(hasVueWarnings).toBe(false);
+  });
+
+  it('has no Vue error', () => {
+    expect(hasVueErrors).toBe(false);
+  });
 });
 
 // if we're generating coverage reports, make sure to include all files so

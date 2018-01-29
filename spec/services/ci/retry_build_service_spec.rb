@@ -1,9 +1,10 @@
 require 'spec_helper'
 
-describe Ci::RetryBuildService, :services do
-  let(:user) { create(:user) }
-  let(:project) { create(:empty_project) }
-  let(:pipeline) { create(:ci_pipeline, project: project) }
+describe Ci::RetryBuildService do
+  set(:user) { create(:user) }
+  set(:project) { create(:project) }
+  set(:pipeline) { create(:ci_pipeline, project: project) }
+
   let(:build) { create(:ci_build, pipeline: pipeline) }
 
   let(:service) do
@@ -16,13 +17,13 @@ describe Ci::RetryBuildService, :services do
     %i[id status user token coverage trace runner artifacts_expire_at
        artifacts_file artifacts_metadata artifacts_size created_at
        updated_at started_at finished_at queued_at erased_by
-       erased_at auto_canceled_by].freeze
+       erased_at auto_canceled_by job_artifacts job_artifacts_archive job_artifacts_metadata].freeze
 
   IGNORE_ACCESSORS =
-    %i[type lock_version target_url base_tags
+    %i[type lock_version target_url base_tags trace_sections
        commit_id deployments erased_by_id last_deployment project_id
        runner_id tag_taggings taggings tags trigger_request_id
-       user_id auto_canceled_by_id retried].freeze
+       user_id auto_canceled_by_id retried failure_reason].freeze
 
   shared_examples 'build duplication' do
     let(:stage) do
@@ -33,13 +34,13 @@ describe Ci::RetryBuildService, :services do
     end
 
     let(:build) do
-      create(:ci_build, :failed, :artifacts_expired, :erased,
+      create(:ci_build, :failed, :artifacts, :expired, :erased,
              :queued, :coverage, :tags, :allowed_to_fail, :on_tag,
              :triggered, :trace, :teardown_environment,
              description: 'my-job', stage: 'test',  pipeline: pipeline,
-             auto_canceled_by: create(:ci_empty_pipeline)) do |build|
+             auto_canceled_by: create(:ci_empty_pipeline, project: project)) do |build|
                ##
-               # TODO, workaround for FactoryGirl limitation when having both
+               # TODO, workaround for FactoryBot limitation when having both
                # stage (text) and stage_id (integer) columns in the table.
                build.stage_id = stage.id
              end
@@ -48,8 +49,19 @@ describe Ci::RetryBuildService, :services do
     describe 'clone accessors' do
       CLONE_ACCESSORS.each do |attribute|
         it "clones #{attribute} build attribute" do
-          expect(new_build.send(attribute)).to be_present
+          expect(new_build.send(attribute)).not_to be_nil
           expect(new_build.send(attribute)).to eq build.send(attribute)
+        end
+      end
+
+      context 'when job has nullified protected' do
+        before do
+          build.update_attribute(:protected, nil)
+        end
+
+        it "clones protected build attribute" do
+          expect(new_build.protected).to be_nil
+          expect(new_build.protected).to eq build.protected
         end
       end
     end
@@ -85,6 +97,8 @@ describe Ci::RetryBuildService, :services do
 
     context 'when user has ability to execute build' do
       before do
+        stub_not_protect_default_branch
+
         project.add_developer(user)
       end
 
@@ -131,6 +145,8 @@ describe Ci::RetryBuildService, :services do
 
     context 'when user has ability to execute build' do
       before do
+        stub_not_protect_default_branch
+
         project.add_developer(user)
       end
 
@@ -144,8 +160,9 @@ describe Ci::RetryBuildService, :services do
         expect(new_build).to be_created
       end
 
-      it 'does mark old build as retried' do
+      it 'does mark old build as retried in the database and on the instance' do
         expect(new_build).to be_latest
+        expect(build).to be_retried
         expect(build.reload).to be_retried
       end
     end

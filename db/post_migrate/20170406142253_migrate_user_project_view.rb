@@ -1,3 +1,4 @@
+# rubocop:disable Migration/UpdateLargeTable
 # See http://doc.gitlab.com/ce/development/migration_style_guide.html
 # for more information on how to write migrations for GitLab.
 
@@ -6,6 +7,8 @@ class MigrateUserProjectView < ActiveRecord::Migration
 
   # Set this constant to true if this migration requires downtime.
   DOWNTIME = false
+
+  disable_ddl_transaction!
 
   def up
     update_column_in_batches(:users, :project_view, 2) do |table, query|

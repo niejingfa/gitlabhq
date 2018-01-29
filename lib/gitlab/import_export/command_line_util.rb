@@ -11,8 +11,9 @@ module Gitlab
         untar_with_options(archive: archive, dir: dir, options: 'zxf')
       end
 
-      def git_bundle(repo_path:, bundle_path:)
-        execute(%W(#{git_bin_path} --git-dir=#{repo_path} bundle create #{bundle_path} --all))
+      def git_clone_bundle(repo_path:, bundle_path:)
+        execute(%W(#{git_bin_path} clone --bare -- #{bundle_path} #{repo_path}))
+        Gitlab::Git::Repository.create_hooks(repo_path, File.expand_path(Gitlab.config.gitlab_shell.hooks_path))
       end
 
       def mkdir_p(path)
@@ -32,7 +33,7 @@ module Gitlab
 
       def execute(cmd)
         output, status = Gitlab::Popen.popen(cmd)
-        @shared.error(Gitlab::ImportExport::Error.new(output.to_s)) unless status.zero?
+        @shared.error(Gitlab::ImportExport::Error.new(output.to_s)) unless status.zero? # rubocop:disable Gitlab/ModuleWithInstanceVariables
         status.zero?
       end
 

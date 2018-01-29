@@ -1,54 +1,41 @@
 require "spec_helper"
 
 describe Gitlab::Git::Branch, seed_helper: true do
-  let(:repository) { Gitlab::Git::Repository.new('default', TEST_REPO_PATH) }
+  let(:repository) { Gitlab::Git::Repository.new('default', TEST_REPO_PATH, '') }
 
   subject { repository.branches }
 
   it { is_expected.to be_kind_of Array }
 
-  describe 'initialize' do
-    let(:commit_id) { 'f00' }
-    let(:commit_subject) { "My commit".force_encoding('ASCII-8BIT') }
-    let(:committer) do
-      Gitaly::FindLocalBranchCommitAuthor.new(
-        name: generate(:name),
-        email: generate(:email),
-        date: Google::Protobuf::Timestamp.new(seconds: 123)
-      )
-    end
-    let(:author) do
-      Gitaly::FindLocalBranchCommitAuthor.new(
-        name: generate(:name),
-        email: generate(:email),
-        date: Google::Protobuf::Timestamp.new(seconds: 456)
-      )
-    end
-    let(:gitaly_branch) do
-      Gitaly::FindLocalBranchResponse.new(
-        name: 'foo', commit_id: commit_id, commit_subject: commit_subject,
-        commit_author: author, commit_committer: committer
-      )
-    end
-    let(:attributes) do
-      {
-        id: commit_id,
-        message: commit_subject,
-        authored_date: Time.at(author.date.seconds),
-        author_name: author.name,
-        author_email: author.email,
-        committed_date: Time.at(committer.date.seconds),
-        committer_name: committer.name,
-        committer_email: committer.email
-      }
-    end
-    let(:branch) { described_class.new(repository, 'foo', gitaly_branch) }
+  describe '.find' do
+    subject { described_class.find(repository, branch) }
 
-    it 'parses Gitaly::FindLocalBranchResponse correctly' do
-      expect(Gitlab::Git::Commit).to receive(:decorate).
-        with(hash_including(attributes)).and_call_original
+    before do
+      allow(repository).to receive(:find_branch).with(branch)
+        .and_call_original
+    end
 
-      expect(branch.dereferenced_target.message.encoding).to be(Encoding::UTF_8)
+    context 'when finding branch via branch name' do
+      let(:branch) { 'master' }
+
+      it 'returns a branch object' do
+        expect(subject).to be_a(described_class)
+        expect(subject.name).to eq(branch)
+
+        expect(repository).to have_received(:find_branch).with(branch)
+      end
+    end
+
+    context 'when the branch is already a branch' do
+      let(:commit) { repository.commit('master') }
+      let(:branch) { described_class.new(repository, 'master', commit.sha, commit) }
+
+      it 'returns a branch object' do
+        expect(subject).to be_a(described_class)
+        expect(subject).to eq(branch)
+
+        expect(repository).not_to have_received(:find_branch).with(branch)
+      end
     end
   end
 

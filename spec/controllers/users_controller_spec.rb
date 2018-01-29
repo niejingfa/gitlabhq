@@ -24,7 +24,7 @@ describe UsersController do
         it 'renders the show template' do
           get :show, username: user.username
 
-          expect(response).to have_http_status(200)
+          expect(response).to have_gitlab_http_status(200)
           expect(response).to render_template('show')
         end
       end
@@ -49,7 +49,7 @@ describe UsersController do
 
         it 'renders show' do
           get :show, username: user.username
-          expect(response).to have_http_status(200)
+          expect(response).to have_gitlab_http_status(200)
           expect(response).to render_template('show')
         end
       end
@@ -70,7 +70,7 @@ describe UsersController do
 
         it 'renders 404' do
           get :show, username: 'nonexistent'
-          expect(response).to have_http_status(404)
+          expect(response).to have_gitlab_http_status(404)
         end
       end
     end
@@ -80,20 +80,26 @@ describe UsersController do
     it 'renders calendar' do
       sign_in(user)
 
-      get :calendar, username: user.username
+      get :calendar, username: user.username, format: :json
 
-      expect(response).to render_template('calendar')
+      expect(response).to have_gitlab_http_status(200)
     end
 
     context 'forked project' do
-      let(:project) { create(:empty_project) }
+      let(:project) { create(:project) }
       let(:forked_project) { Projects::ForkService.new(project, user).execute }
 
       before do
         sign_in(user)
-        project.team << [user, :developer]
-        EventCreateService.new.push(project, user, [])
-        EventCreateService.new.push(forked_project, user, [])
+        project.add_developer(user)
+
+        push_data = Gitlab::DataBuilder::Push.build_sample(project, user)
+
+        fork_push_data = Gitlab::DataBuilder::Push
+          .build_sample(forked_project, user)
+
+        EventCreateService.new.push(project, user, push_data)
+        EventCreateService.new.push(forked_project, user, fork_push_data)
       end
 
       it 'includes forked projects' do
@@ -104,14 +110,14 @@ describe UsersController do
   end
 
   describe 'GET #calendar_activities' do
-    let!(:project) { create(:empty_project) }
+    let!(:project) { create(:project) }
     let(:user) { create(:user) }
 
     before do
       allow_any_instance_of(User).to receive(:contributed_projects_ids).and_return([project.id])
 
       sign_in(user)
-      project.team << [user, :developer]
+      project.add_developer(user)
     end
 
     it 'assigns @calendar_date' do
@@ -133,7 +139,7 @@ describe UsersController do
     context 'format html' do
       it 'renders snippets page' do
         get :snippets, username: user.username
-        expect(response).to have_http_status(200)
+        expect(response).to have_gitlab_http_status(200)
         expect(response).to render_template('show')
       end
     end
@@ -141,7 +147,7 @@ describe UsersController do
     context 'format json' do
       it 'response with snippets json data' do
         get :snippets, username: user.username, format: :json
-        expect(response).to have_http_status(200)
+        expect(response).to have_gitlab_http_status(200)
         expect(JSON.parse(response.body)).to have_key('html')
       end
     end

@@ -30,18 +30,18 @@ class CleanupNamespacelessPendingDeleteProjects < ActiveRecord::Migration
   private
 
   def pending_delete_batch
-    connection.exec_query(find_batch).map{ |row| row['id'].to_i }
+    connection.exec_query(find_batch).map { |row| row['id'].to_i }
   end
 
   BATCH_SIZE = 5000
 
   def find_batch
     projects = Arel::Table.new(:projects)
-    projects.project(projects[:id]).
-      where(projects[:pending_delete].eq(true)).
-      where(projects[:namespace_id].eq(nil)).
-      skip(@offset * BATCH_SIZE).
-      take(BATCH_SIZE).
-      to_sql
+    projects.project(projects[:id])
+      .where(projects[:pending_delete].eq(true))
+      .where(projects[:namespace_id].eq(nil))
+      .skip(@offset * BATCH_SIZE)
+      .take(BATCH_SIZE)
+      .to_sql
   end
 end

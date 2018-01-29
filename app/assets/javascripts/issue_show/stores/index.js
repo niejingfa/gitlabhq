@@ -1,34 +1,19 @@
 export default class Store {
-  constructor({
-    titleHtml,
-    titleText,
-    descriptionHtml,
-    descriptionText,
-    updatedAt,
-    updatedByName,
-    updatedByPath,
-  }) {
-    this.state = {
-      titleHtml,
-      titleText,
-      descriptionHtml,
-      descriptionText,
-      taskStatus: '',
-      updatedAt,
-      updatedByName,
-      updatedByPath,
-    };
+  constructor(initialState) {
+    this.state = initialState;
     this.formState = {
       title: '',
-      confidential: false,
       description: '',
       lockedWarningVisible: false,
-      move_to_project_id: 0,
       updateLoading: false,
     };
   }
 
   updateState(data) {
+    if (this.stateShouldUpdate(data)) {
+      this.formState.lockedWarningVisible = true;
+    }
+
     this.state.titleHtml = data.title;
     this.state.titleText = data.title_text;
     this.state.descriptionHtml = data.description;
@@ -40,10 +25,8 @@ export default class Store {
   }
 
   stateShouldUpdate(data) {
-    return {
-      title: this.state.titleText !== data.title_text,
-      description: this.state.descriptionText !== data.description_text,
-    };
+    return this.state.titleText !== data.title_text ||
+      this.state.descriptionText !== data.description_text;
   }
 
   setFormState(state) {

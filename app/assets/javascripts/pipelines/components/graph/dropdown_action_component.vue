@@ -1,12 +1,19 @@
 <script>
-  import getActionIcon from '../../../vue_shared/ci_action_icons';
-  import tooltipMixin from '../../../vue_shared/mixins/tooltip';
+  import icon from '../../../vue_shared/components/icon.vue';
+  import tooltip from '../../../vue_shared/directives/tooltip';
 
   /**
    * Renders either a cancel, retry or play icon pointing to the given path.
    * TODO: Remove UJS from here and use an async request instead.
    */
   export default {
+    components: {
+      icon,
+    },
+
+    directives: {
+      tooltip,
+    },
     props: {
       tooltipText: {
         type: String,
@@ -28,29 +35,19 @@
         required: true,
       },
     },
-
-    mixins: [
-      tooltipMixin,
-    ],
-
-    computed: {
-      actionIconSvg() {
-        return getActionIcon(this.actionIcon);
-      },
-    },
   };
 </script>
 <template>
   <a
+    v-tooltip
     :data-method="actionMethod"
     :title="tooltipText"
     :href="link"
-    ref="tooltip"
     rel="nofollow"
     class="ci-action-icon-wrapper js-ci-status-icon"
-    data-toggle="tooltip"
     data-container="body"
-    v-html="actionIconSvg"
-    aria-label="Job's action">
+    aria-label="Job's action"
+  >
+    <icon :name="actionIcon" />
   </a>
 </template>

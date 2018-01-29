@@ -1,3 +1,4 @@
+import _ from 'underscore';
 import AjaxCache from '~/lib/utils/ajax_cache';
 import UsersCache from '~/lib/utils/users_cache';
 
@@ -791,9 +792,95 @@ describe('Filtered Search Visual Tokens', () => {
         expect(tokenValueElement.innerText.trim()).toBe(dummyUser.name);
         const avatar = tokenValueElement.querySelector('img.avatar');
         expect(avatar.src).toBe(dummyUser.avatar_url);
+        expect(avatar.alt).toBe('');
       })
       .then(done)
       .catch(done.fail);
+    });
+
+    it('escapes user name when creating token', (done) => {
+      const dummyUser = {
+        name: '<script>',
+        avatar_url: `${gl.TEST_HOST}/mypics/avatar.png`,
+      };
+      const { tokenValueContainer, tokenValueElement } = findElements(authorToken);
+      const tokenValue = tokenValueElement.innerText;
+      usersCacheSpy = (username) => {
+        expect(`@${username}`).toBe(tokenValue);
+        return Promise.resolve(dummyUser);
+      };
+
+      subject.updateUserTokenAppearance(tokenValueContainer, tokenValueElement, tokenValue)
+      .then(() => {
+        expect(tokenValueElement.innerText.trim()).toBe(dummyUser.name);
+        tokenValueElement.querySelector('.avatar').remove();
+        expect(tokenValueElement.innerHTML.trim()).toBe(_.escape(dummyUser.name));
+      })
+      .then(done)
+      .catch(done.fail);
+    });
+  });
+
+  describe('setTokenStyle', () => {
+    let originalTextColor;
+
+    beforeEach(() => {
+      originalTextColor = bugLabelToken.style.color;
+    });
+
+    it('should set backgroundColor', () => {
+      const originalBackgroundColor = bugLabelToken.style.backgroundColor;
+      const token = subject.setTokenStyle(bugLabelToken, 'blue', 'white');
+      expect(token.style.backgroundColor).toEqual('blue');
+      expect(token.style.backgroundColor).not.toEqual(originalBackgroundColor);
+    });
+
+    it('should not set backgroundColor when it is a linear-gradient', () => {
+      const token = subject.setTokenStyle(bugLabelToken, 'linear-gradient(135deg, red, blue)', 'white');
+      expect(token.style.backgroundColor).toEqual(bugLabelToken.style.backgroundColor);
+    });
+
+    it('should set textColor', () => {
+      const token = subject.setTokenStyle(bugLabelToken, 'white', 'black');
+      expect(token.style.color).toEqual('black');
+      expect(token.style.color).not.toEqual(originalTextColor);
+    });
+
+    it('should add inverted class when textColor is #FFFFFF', () => {
+      const token = subject.setTokenStyle(bugLabelToken, 'black', '#FFFFFF');
+      expect(token.style.color).toEqual('rgb(255, 255, 255)');
+      expect(token.style.color).not.toEqual(originalTextColor);
+      expect(token.querySelector('.remove-token').classList.contains('inverted')).toEqual(true);
+    });
+  });
+
+  describe('preprocessLabel', () => {
+    const endpoint = 'endpoint';
+
+    it('does not preprocess more than once', () => {
+      let labels = [];
+
+      spyOn(gl.DropdownUtils, 'duplicateLabelPreprocessing').and.callFake(() => []);
+
+      labels = gl.FilteredSearchVisualTokens.preprocessLabel(endpoint, labels);
+      gl.FilteredSearchVisualTokens.preprocessLabel(endpoint, labels);
+
+      expect(gl.DropdownUtils.duplicateLabelPreprocessing.calls.count()).toEqual(1);
+    });
+
+    describe('not preprocessed before', () => {
+      it('returns preprocessed labels', () => {
+        let labels = [];
+        expect(labels.preprocessed).not.toEqual(true);
+        labels = gl.FilteredSearchVisualTokens.preprocessLabel(endpoint, labels);
+        expect(labels.preprocessed).toEqual(true);
+      });
+
+      it('overrides AjaxCache with preprocessed results', () => {
+        spyOn(AjaxCache, 'override').and.callFake(() => {});
+        gl.FilteredSearchVisualTokens.preprocessLabel(endpoint, []);
+        expect(AjaxCache.override.calls.count()).toEqual(1);
+      });
     });
   });
 

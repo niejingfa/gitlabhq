@@ -1,3 +1,5 @@
+# rubocop:disable GitlabSecurity/PublicSend
+
 require_dependency Rails.root.join('lib/gitlab') # Load Gitlab as soon as possible
 
 class Settings < Settingslogic
@@ -66,16 +68,18 @@ class Settings < Settingslogic
         end
         values.delete_if { |value| value.nil? }
       end
+
       values
     end
 
     # check that `current` (string or integer) is a contant in `modul`.
     def verify_constant(modul, current, default)
-      constant = modul.constants.find{ |name| modul.const_get(name) == current }
+      constant = modul.constants.find { |name| modul.const_get(name) == current }
       value = constant.nil? ? default : modul.const_get(constant)
       if current.is_a? String
         value = modul.const_get(current.upcase) rescue default
       end
+
       value
     end
 
@@ -111,12 +115,14 @@ class Settings < Settingslogic
       URI.parse(url_without_path).host
     end
 
-    # Random cron time every Sunday to load balance usage pings
-    def cron_random_weekly_time
+    # Runs every minute in a random ten-minute period on Sundays, to balance the
+    # load on the server receiving these pings. The usage ping is safe to run
+    # multiple times because of a 24 hour exclusive lock.
+    def cron_for_usage_ping
       hour = rand(24)
-      minute = rand(60)
+      minute = rand(6)
 
-      "#{minute} #{hour} * * 0"
+      "#{minute}0-#{minute}9 #{hour} * * 0"
     end
   end
 end
@@ -137,6 +143,8 @@ if Settings.ldap['enabled'] || Rails.env.test?
   end
 
   Settings.ldap['servers'].each do |key, server|
+    server = Settingslogic.new(server)
+
     server['label'] ||= 'LDAP'
     server['timeout'] ||= 10.seconds
     server['block_auto_created_users'] = false if server['block_auto_created_users'].nil?
@@ -145,6 +153,19 @@ if Settings.ldap['enabled'] || Rails.env.test?
     server['attributes'] = {} if server['attributes'].nil?
     server['provider_name'] ||= "ldap#{key}".downcase
     server['provider_class'] = OmniAuth::Utils.camelize(server['provider_name'])
+
+    # For backwards compatibility
+    server['encryption'] ||= server['method']
+    server['encryption'] = 'simple_tls' if server['encryption'] == 'ssl'
+    server['encryption'] = 'start_tls' if server['encryption'] == 'tls'
+
+    # Certificate verification was added in 9.4.2, and defaulted to false for
+    # backwards-compatibility.
+    #
+    # Since GitLab 10.0, verify_certificates defaults to true for security.
+    server['verify_certificates'] = true if server['verify_certificates'].nil?
+
+    Settings.ldap['servers'][key] = server
   end
 end
 
@@ -156,7 +177,20 @@ Settings.omniauth['external_providers'] = [] if Settings.omniauth['external_prov
 Settings.omniauth['block_auto_created_users'] = true if Settings.omniauth['block_auto_created_users'].nil?
 Settings.omniauth['auto_link_ldap_user'] = false if Settings.omniauth['auto_link_ldap_user'].nil?
 Settings.omniauth['auto_link_saml_user'] = false if Settings.omniauth['auto_link_saml_user'].nil?
-Settings.omniauth['sync_email_from_provider'] ||= nil
+
+Settings.omniauth['sync_profile_from_provider'] = false if Settings.omniauth['sync_profile_from_provider'].nil?
+Settings.omniauth['sync_profile_attributes'] = ['email'] if Settings.omniauth['sync_profile_attributes'].nil?
+
+# Handle backwards compatibility with merge request 11268
+if Settings.omniauth['sync_email_from_provider']
+  if Settings.omniauth['sync_profile_from_provider'].is_a?(Array)
+    Settings.omniauth['sync_profile_from_provider'] |= [Settings.omniauth['sync_email_from_provider']]
+  elsif !Settings.omniauth['sync_profile_from_provider']
+    Settings.omniauth['sync_profile_from_provider'] = [Settings.omniauth['sync_email_from_provider']]
+  end
+
+  Settings.omniauth['sync_profile_attributes'] |= ['email'] unless Settings.omniauth['sync_profile_attributes'] == true
+end
 
 Settings.omniauth['providers'] ||= []
 Settings.omniauth['cas3'] ||= Settingslogic.new({})
@@ -202,10 +236,11 @@ Settings['gitlab'] ||= Settingslogic.new({})
 Settings.gitlab['default_projects_limit'] ||= 100000
 Settings.gitlab['default_branch_protection'] ||= 2
 Settings.gitlab['default_can_create_group'] = true if Settings.gitlab['default_can_create_group'].nil?
+Settings.gitlab['default_theme'] = Gitlab::Themes::APPLICATION_DEFAULT if Settings.gitlab['default_theme'].nil?
 Settings.gitlab['host']       ||= ENV['GITLAB_HOST'] || 'localhost'
 Settings.gitlab['ssh_host']   ||= Settings.gitlab.host
 Settings.gitlab['https']        = false if Settings.gitlab['https'].nil?
-Settings.gitlab['port']       ||= Settings.gitlab.https ? 443 : 80
+Settings.gitlab['port']       ||= ENV['GITLAB_PORT'] || (Settings.gitlab.https ? 443 : 80)
 Settings.gitlab['relative_url_root'] ||= ENV['RAILS_RELATIVE_URL_ROOT'] || ''
 Settings.gitlab['protocol'] ||= Settings.gitlab.https ? "https" : "http"
 Settings.gitlab['email_enabled'] ||= true if Settings.gitlab['email_enabled'].nil?
@@ -226,7 +261,7 @@ Settings.gitlab['signup_enabled'] ||= true if Settings.gitlab['signup_enabled'].
 Settings.gitlab['signin_enabled'] ||= true if Settings.gitlab['signin_enabled'].nil?
 Settings.gitlab['restricted_visibility_levels'] = Settings.__send__(:verify_constant_array, Gitlab::VisibilityLevel, Settings.gitlab['restricted_visibility_levels'], [])
 Settings.gitlab['username_changing_enabled'] = true if Settings.gitlab['username_changing_enabled'].nil?
-Settings.gitlab['issue_closing_pattern'] = '((?:[Cc]los(?:e[sd]?|ing)|[Ff]ix(?:e[sd]|ing)?|[Rr]esolv(?:e[sd]?|ing))(:?) +(?:(?:issues? +)?%{issue_ref}(?:(?:, *| +and +)?)|([A-Z][A-Z0-9_]+-\d+))+)' if Settings.gitlab['issue_closing_pattern'].nil?
+Settings.gitlab['issue_closing_pattern'] = '((?:[Cc]los(?:e[sd]?|ing)|[Ff]ix(?:e[sd]|ing)?|[Rr]esolv(?:e[sd]?|ing)|[Ii]mplement(?:s|ed|ing)?)(:?) +(?:(?:issues? +)?%{issue_ref}(?:(?:, *| +and +)?)|([A-Z][A-Z0-9_]+-\d+))+)' if Settings.gitlab['issue_closing_pattern'].nil?
 Settings.gitlab['default_projects_features'] ||= {}
 Settings.gitlab['webhook_timeout'] ||= 10
 Settings.gitlab['max_attachment_size'] ||= 10
@@ -239,7 +274,7 @@ Settings.gitlab.default_projects_features['builds']             = true if Settin
 Settings.gitlab.default_projects_features['container_registry'] = true if Settings.gitlab.default_projects_features['container_registry'].nil?
 Settings.gitlab.default_projects_features['visibility_level']   = Settings.__send__(:verify_constant, Gitlab::VisibilityLevel, Settings.gitlab.default_projects_features['visibility_level'], Gitlab::VisibilityLevel::PRIVATE)
 Settings.gitlab['domain_whitelist'] ||= []
-Settings.gitlab['import_sources'] ||= %w[github bitbucket gitlab google_code fogbugz git gitlab_project gitea]
+Settings.gitlab['import_sources'] ||= Gitlab::ImportSources.values
 Settings.gitlab['trusted_proxies'] ||= []
 Settings.gitlab['no_todos_messages'] ||= YAML.load_file(Rails.root.join('config', 'no_todos_messages.yml'))
 Settings.gitlab['usage_ping_enabled'] = true if Settings.gitlab['usage_ping_enabled'].nil?
@@ -285,15 +320,16 @@ Settings.registry['path']            = Settings.absolute(Settings.registry['path
 # Pages
 #
 Settings['pages'] ||= Settingslogic.new({})
-Settings.pages['enabled']         = false if Settings.pages['enabled'].nil?
-Settings.pages['path']            = Settings.absolute(Settings.pages['path'] || File.join(Settings.shared['path'], "pages"))
-Settings.pages['https']           = false if Settings.pages['https'].nil?
-Settings.pages['host']            ||= "example.com"
-Settings.pages['port']            ||= Settings.pages.https ? 443 : 80
-Settings.pages['protocol']        ||= Settings.pages.https ? "https" : "http"
-Settings.pages['url']             ||= Settings.__send__(:build_pages_url)
-Settings.pages['external_http']   ||= false unless Settings.pages['external_http'].present?
-Settings.pages['external_https']  ||= false unless Settings.pages['external_https'].present?
+Settings.pages['enabled']           = false if Settings.pages['enabled'].nil?
+Settings.pages['path']              = Settings.absolute(Settings.pages['path'] || File.join(Settings.shared['path'], "pages"))
+Settings.pages['https']             = false if Settings.pages['https'].nil?
+Settings.pages['host']              ||= "example.com"
+Settings.pages['port']              ||= Settings.pages.https ? 443 : 80
+Settings.pages['protocol']          ||= Settings.pages.https ? "https" : "http"
+Settings.pages['url']               ||= Settings.__send__(:build_pages_url)
+Settings.pages['external_http']     ||= false unless Settings.pages['external_http'].present?
+Settings.pages['external_https']    ||= false unless Settings.pages['external_https'].present?
+Settings.pages['artifacts_server']  ||= Settings.pages['enabled'] if Settings.pages['artifacts_server'].nil?
 
 #
 # Git LFS
@@ -366,7 +402,7 @@ Settings.cron_jobs['stuck_import_jobs_worker'] ||= Settingslogic.new({})
 Settings.cron_jobs['stuck_import_jobs_worker']['cron'] ||= '15 * * * *'
 Settings.cron_jobs['stuck_import_jobs_worker']['job_class'] = 'StuckImportJobsWorker'
 Settings.cron_jobs['gitlab_usage_ping_worker'] ||= Settingslogic.new({})
-Settings.cron_jobs['gitlab_usage_ping_worker']['cron'] ||= Settings.__send__(:cron_random_weekly_time)
+Settings.cron_jobs['gitlab_usage_ping_worker']['cron'] ||= Settings.__send__(:cron_for_usage_ping)
 Settings.cron_jobs['gitlab_usage_ping_worker']['job_class'] = 'GitlabUsagePingWorker'
 
 Settings.cron_jobs['schedule_update_user_activity_worker'] ||= Settingslogic.new({})
@@ -376,6 +412,10 @@ Settings.cron_jobs['schedule_update_user_activity_worker']['job_class'] = 'Sched
 Settings.cron_jobs['remove_old_web_hook_logs_worker'] ||= Settingslogic.new({})
 Settings.cron_jobs['remove_old_web_hook_logs_worker']['cron'] ||= '40 0 * * *'
 Settings.cron_jobs['remove_old_web_hook_logs_worker']['job_class'] = 'RemoveOldWebHookLogsWorker'
+
+Settings.cron_jobs['stuck_merge_jobs_worker'] ||= Settingslogic.new({})
+Settings.cron_jobs['stuck_merge_jobs_worker']['cron'] ||= '0 */2 * * *'
+Settings.cron_jobs['stuck_merge_jobs_worker']['job_class'] = 'StuckMergeJobsWorker'
 
 #
 # GitLab Shell
@@ -391,7 +431,7 @@ Settings.gitlab_shell['ssh_port']     ||= 22
 Settings.gitlab_shell['ssh_user']     ||= Settings.gitlab.user
 Settings.gitlab_shell['owner_group']  ||= Settings.gitlab.user
 Settings.gitlab_shell['ssh_path_prefix'] ||= Settings.__send__(:build_gitlab_shell_ssh_path_prefix)
-Settings.gitlab_shell['git_timeout'] ||= 800
+Settings.gitlab_shell['git_timeout'] ||= 10800
 
 #
 # Workhorse
@@ -412,9 +452,13 @@ unless Settings.repositories.storages['default']
   Settings.repositories.storages['default']['path'] ||= Settings.gitlab['user_home'] + '/repositories/'
 end
 
-Settings.repositories.storages.values.each do |storage|
+Settings.repositories.storages.each do |key, storage|
+  storage = Settingslogic.new(storage)
+
   # Expand relative paths
   storage['path'] = Settings.absolute(storage['path'])
+
+  Settings.repositories.storages[key] = storage
 end
 
 #
@@ -441,10 +485,6 @@ Settings.backup['pg_schema']    = nil
 Settings.backup['path']         = Settings.absolute(Settings.backup['path'] || "tmp/backups/")
 Settings.backup['archive_permissions'] ||= 0600
 Settings.backup['upload'] ||= Settingslogic.new({ 'remote_directory' => nil, 'connection' => nil })
-# Convert upload connection settings to use symbol keys, to make Fog happy
-if Settings.backup['upload']['connection']
-  Settings.backup['upload']['connection'] = Hash[Settings.backup['upload']['connection'].map { |k, v| [k.to_sym, v] }]
-end
 Settings.backup['upload']['multipart_chunk_size'] ||= 104857600
 Settings.backup['upload']['encryption'] ||= nil
 Settings.backup['upload']['storage_class'] ||= nil
@@ -453,9 +493,7 @@ Settings.backup['upload']['storage_class'] ||= nil
 # Git
 #
 Settings['git'] ||= Settingslogic.new({})
-Settings.git['max_size']  ||= 20971520 # 20.megabytes
-Settings.git['bin_path']  ||= '/usr/bin/git'
-Settings.git['timeout']   ||= 10
+Settings.git['bin_path'] ||= '/usr/bin/git'
 
 # Important: keep the satellites.path setting until GitLab 9.0 at
 # least. This setting is fed to 'rm -rf' in
@@ -483,7 +521,6 @@ Settings.rack_attack.git_basic_auth['bantime'] ||= 1.hour
 # Gitaly
 #
 Settings['gitaly'] ||= Settingslogic.new({})
-Settings.gitaly['enabled'] = true if Settings.gitaly['enabled'].nil?
 
 #
 # Webpack settings
@@ -493,6 +530,18 @@ Settings.webpack['dev_server'] ||= Settingslogic.new({})
 Settings.webpack.dev_server['enabled'] ||= false
 Settings.webpack.dev_server['host']    ||= 'localhost'
 Settings.webpack.dev_server['port']    ||= 3808
+
+#
+# Monitoring settings
+#
+Settings['monitoring'] ||= Settingslogic.new({})
+Settings.monitoring['ip_whitelist'] ||= ['127.0.0.1/8']
+Settings.monitoring['unicorn_sampler_interval'] ||= 10
+Settings.monitoring['ruby_sampler_interval'] ||= 60
+Settings.monitoring['sidekiq_exporter'] ||= Settingslogic.new({})
+Settings.monitoring.sidekiq_exporter['enabled'] ||= false
+Settings.monitoring.sidekiq_exporter['address'] ||= 'localhost'
+Settings.monitoring.sidekiq_exporter['port'] ||= 3807
 
 #
 # Testing settings

@@ -1,11 +1,22 @@
 import Vue from 'vue';
 import descriptionComponent from '~/issue_show/components/description.vue';
+import * as taskList from '~/task_list';
+import mountComponent from '../../helpers/vue_mount_component_helper';
 
 describe('Description component', () => {
   let vm;
+  let DescriptionComponent;
+  const props = {
+    canUpdate: true,
+    descriptionHtml: 'test',
+    descriptionText: 'test',
+    updatedAt: new Date().toString(),
+    taskStatus: '',
+    updateUrl: gl.TEST_HOST,
+  };
 
   beforeEach(() => {
-    const Component = Vue.extend(descriptionComponent);
+    DescriptionComponent = Vue.extend(descriptionComponent);
 
     if (!document.querySelector('.issuable-meta')) {
       const metaData = document.createElement('div');
@@ -15,15 +26,11 @@ describe('Description component', () => {
       document.body.appendChild(metaData);
     }
 
-    vm = new Component({
-      propsData: {
-        canUpdate: true,
-        descriptionHtml: 'test',
-        descriptionText: 'test',
-        updatedAt: new Date().toString(),
-        taskStatus: '',
-      },
-    }).$mount();
+    vm = mountComponent(DescriptionComponent, props);
+  });
+
+  afterEach(() => {
+    vm.$destroy();
   });
 
   it('animates description changes', (done) => {
@@ -44,30 +51,74 @@ describe('Description component', () => {
     });
   });
 
-  it('re-inits the TaskList when description changed', (done) => {
-    spyOn(gl, 'TaskList');
-    vm.descriptionHtml = 'changed';
+  it('opens recaptcha dialog if update rejected as spam', (done) => {
+    let modal;
+    const recaptchaChild = vm.$children
+      .find(child => child.$options._componentTag === 'recaptcha-modal'); // eslint-disable-line no-underscore-dangle
 
-    setTimeout(() => {
-      expect(
-        gl.TaskList,
-      ).toHaveBeenCalled();
+    recaptchaChild.scriptSrc = '//scriptsrc';
 
-      done();
+    vm.taskListUpdateSuccess({
+      recaptcha_html: '<div class="g-recaptcha">recaptcha_html</div>',
     });
+
+    vm.$nextTick()
+      .then(() => {
+        modal = vm.$el.querySelector('.js-recaptcha-modal');
+
+        expect(modal.style.display).not.toEqual('none');
+        expect(modal.querySelector('.g-recaptcha').textContent).toEqual('recaptcha_html');
+        expect(document.body.querySelector('.js-recaptcha-script').src).toMatch('//scriptsrc');
+      })
+      .then(() => modal.querySelector('.close').click())
+      .then(() => vm.$nextTick())
+      .then(() => {
+        expect(modal.style.display).toEqual('none');
+        expect(document.body.querySelector('.js-recaptcha-script')).toBeNull();
+      })
+      .then(done)
+      .catch(done.fail);
   });
 
-  it('does not re-init the TaskList when canUpdate is false', (done) => {
-    spyOn(gl, 'TaskList');
-    vm.canUpdate = false;
-    vm.descriptionHtml = 'changed';
+  describe('TaskList', () => {
+    beforeEach(() => {
+      vm = mountComponent(DescriptionComponent, Object.assign({}, props, {
+        issuableType: 'issuableType',
+      }));
+      spyOn(taskList, 'default');
+    });
 
-    setTimeout(() => {
-      expect(
-        gl.TaskList,
-      ).not.toHaveBeenCalled();
+    it('re-inits the TaskList when description changed', (done) => {
+      vm.descriptionHtml = 'changed';
 
-      done();
+      setTimeout(() => {
+        expect(taskList.default).toHaveBeenCalled();
+        done();
+      });
+    });
+
+    it('does not re-init the TaskList when canUpdate is false', (done) => {
+      vm.canUpdate = false;
+      vm.descriptionHtml = 'changed';
+
+      setTimeout(() => {
+        expect(taskList.default).not.toHaveBeenCalled();
+        done();
+      });
+    });
+
+    it('calls with issuableType dataType', (done) => {
+      vm.descriptionHtml = 'changed';
+
+      setTimeout(() => {
+        expect(taskList.default).toHaveBeenCalledWith({
+          dataType: 'issuableType',
+          fieldName: 'description',
+          selector: '.detail-page-description',
+          onSuccess: jasmine.any(Function),
+        });
+        done();
+      });
     });
   });
 
@@ -95,5 +146,37 @@ describe('Description component', () => {
         done();
       });
     });
+
+    it('clears task status text when no tasks are present', (done) => {
+      vm.taskStatus = '0 of 0';
+
+      setTimeout(() => {
+        expect(
+          document.querySelector('.issuable-meta #task_status').textContent.trim(),
+        ).toBe('');
+
+        done();
+      });
+    });
+  });
+
+  it('applies syntax highlighting and math when description changed', (done) => {
+    spyOn(vm, 'renderGFM').and.callThrough();
+    spyOn($.prototype, 'renderGFM').and.callThrough();
+    vm.descriptionHtml = 'changed';
+
+    Vue.nextTick(() => {
+      setTimeout(() => {
+        expect(vm.$refs['gfm-content']).toBeDefined();
+        expect(vm.renderGFM).toHaveBeenCalled();
+        expect($.prototype.renderGFM).toHaveBeenCalled();
+
+        done();
+      });
+    });
+  });
+
+  it('sets data-update-url', () => {
+    expect(vm.$el.querySelector('textarea').dataset.updateUrl).toEqual(gl.TEST_HOST);
   });
 });

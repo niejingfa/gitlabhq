@@ -1,52 +1,10 @@
 class IssuableBaseService < BaseService
   private
 
-  def create_milestone_note(issuable)
-    SystemNoteService.change_milestone(
-      issuable, issuable.project, current_user, issuable.milestone)
-  end
-
-  def create_labels_note(issuable, old_labels)
-    added_labels = issuable.labels - old_labels
-    removed_labels = old_labels - issuable.labels
-
-    SystemNoteService.change_label(
-      issuable, issuable.project, current_user, added_labels, removed_labels)
-  end
-
-  def create_title_change_note(issuable, old_title)
-    SystemNoteService.change_title(
-      issuable, issuable.project, current_user, old_title)
-  end
-
-  def create_description_change_note(issuable)
-    SystemNoteService.change_description(issuable, issuable.project, current_user)
-  end
-
-  def create_branch_change_note(issuable, branch_type, old_branch, new_branch)
-    SystemNoteService.change_branch(
-      issuable, issuable.project, current_user, branch_type,
-      old_branch, new_branch)
-  end
-
-  def create_task_status_note(issuable)
-    issuable.updated_tasks.each do |task|
-      SystemNoteService.change_task_status(issuable, issuable.project, current_user, task)
-    end
-  end
-
-  def create_time_estimate_note(issuable)
-    SystemNoteService.change_time_estimate(issuable, issuable.project, current_user)
-  end
-
-  def create_time_spent_note(issuable)
-    SystemNoteService.change_time_spent(issuable, issuable.project, current_user)
-  end
-
   def filter_params(issuable)
     ability_name = :"admin_#{issuable.to_ability_name}"
 
-    unless can?(current_user, ability_name, project)
+    unless can?(current_user, ability_name, issuable)
       params.delete(:milestone_id)
       params.delete(:labels)
       params.delete(:add_label_ids)
@@ -55,6 +13,9 @@ class IssuableBaseService < BaseService
       params.delete(:assignee_ids)
       params.delete(:assignee_id)
       params.delete(:due_date)
+      params.delete(:canonical_issue_id)
+      params.delete(:project)
+      params.delete(:discussion_locked)
     end
 
     filter_assignee(issuable)
@@ -89,10 +50,12 @@ class IssuableBaseService < BaseService
     milestone_id = params[:milestone_id]
     return unless milestone_id
 
-    if milestone_id == IssuableFinder::NONE ||
-        project.milestones.find_by(id: milestone_id).nil?
-      params[:milestone_id] = ''
-    end
+    params[:milestone_id] = '' if milestone_id == IssuableFinder::NONE
+
+    milestone =
+      Milestone.for_projects_and_groups([project.id], [project.group&.id]).find_by_id(milestone_id)
+
+    params[:milestone_id] = '' unless milestone
   end
 
   def filter_labels
@@ -142,13 +105,15 @@ class IssuableBaseService < BaseService
     LabelsFinder.new(current_user, project_id: @project.id).execute
   end
 
-  def merge_slash_commands_into_params!(issuable)
+  def merge_quick_actions_into_params!(issuable)
+    original_description = params.fetch(:description, issuable.description)
+
     description, command_params =
-      SlashCommands::InterpretService.new(project, current_user).
-        execute(params[:description], issuable)
+      QuickActions::InterpretService.new(project, current_user)
+        .execute(original_description, issuable)
 
     # Avoid a description already set on an issuable to be overwritten by a nil
-    params[:description] = description if params.key?(:description)
+    params[:description] = description if description
 
     params.merge!(command_params)
   end
@@ -162,7 +127,7 @@ class IssuableBaseService < BaseService
   end
 
   def create(issuable)
-    merge_slash_commands_into_params!(issuable)
+    merge_quick_actions_into_params!(issuable)
     filter_params(issuable)
 
     params.delete(:state_event)
@@ -176,9 +141,9 @@ class IssuableBaseService < BaseService
 
     if params.present? && create_issuable(issuable, params, label_ids: label_ids)
       after_create(issuable)
-      issuable.create_cross_references!(current_user)
       execute_hooks(issuable)
-      invalidate_cache_counts(issuable.assignees, issuable)
+      invalidate_cache_counts(issuable, users: issuable.assignees)
+      issuable.update_project_counter_caches
     end
 
     issuable
@@ -206,9 +171,7 @@ class IssuableBaseService < BaseService
     change_todo(issuable)
     toggle_award(issuable)
     filter_params(issuable)
-    old_labels = issuable.labels.to_a
-    old_mentioned_users = issuable.mentioned_users.to_a
-    old_assignees = issuable.assignees.to_a
+    old_associations = associations_before_update(issuable)
 
     label_ids = process_label_ids(params, existing_label_ids: issuable.label_ids)
     params[:label_ids] = label_ids if labels_changing?(issuable.label_ids, label_ids)
@@ -222,27 +185,31 @@ class IssuableBaseService < BaseService
 
       before_update(issuable)
 
+      # We have to perform this check before saving the issuable as Rails resets
+      # the changed fields upon calling #save.
+      update_project_counters = issuable.project && update_project_counter_caches?(issuable)
+
       if issuable.with_transaction_returning_status { issuable.save }
         # We do not touch as it will affect a update on updated_at field
         ActiveRecord::Base.no_touching do
-          handle_common_system_notes(issuable, old_labels: old_labels)
+          Issuable::CommonSystemNotesService.new(project, current_user).execute(issuable, old_associations[:labels])
         end
 
-        handle_changes(
-          issuable,
-          old_labels: old_labels,
-          old_mentioned_users: old_mentioned_users,
-          old_assignees: old_assignees
-        )
+        handle_changes(issuable, old_associations: old_associations)
 
-        if old_assignees != issuable.assignees
-          assignees = old_assignees + issuable.assignees.to_a
-          invalidate_cache_counts(assignees.compact, issuable)
-        end
+        new_assignees = issuable.assignees.to_a
+        affected_assignees = (old_associations[:assignees] + new_assignees) - (old_associations[:assignees] & new_assignees)
 
+        invalidate_cache_counts(issuable, users: affected_assignees.compact)
         after_update(issuable)
         issuable.create_new_cross_references!(current_user)
-        execute_hooks(issuable, 'update')
+        execute_hooks(
+          issuable,
+          'update',
+          old_associations: old_associations
+        )
+
+        issuable.update_project_counter_caches if update_project_counters
       end
     end
 
@@ -281,7 +248,7 @@ class IssuableBaseService < BaseService
       todo_service.mark_todo(issuable, current_user)
     when 'done'
       todo = TodosFinder.new(current_user).execute.find_by(target: issuable)
-      todo_service.mark_todos_as_done([todo], current_user) if todo
+      todo_service.mark_todos_as_done_by_ids(todo, current_user) if todo
     end
   end
 
@@ -291,6 +258,18 @@ class IssuableBaseService < BaseService
       todo_service.new_award_emoji(issuable, current_user)
       issuable.toggle_award_emoji(award, current_user)
     end
+  end
+
+  def associations_before_update(issuable)
+    associations =
+      {
+        labels: issuable.labels.to_a,
+        mentioned_users: issuable.mentioned_users.to_a,
+        assignees: issuable.assignees.to_a
+      }
+    associations[:total_time_spent] = issuable.total_time_spent if issuable.respond_to?(:total_time_spent)
+
+    associations
   end
 
   def has_changes?(issuable, old_labels: [], old_assignees: [])
@@ -307,35 +286,21 @@ class IssuableBaseService < BaseService
     attrs_changed || labels_changed || assignees_changed
   end
 
-  def handle_common_system_notes(issuable, old_labels: [])
-    if issuable.previous_changes.include?('title')
-      create_title_change_note(issuable, issuable.previous_changes['title'].first)
+  def invalidate_cache_counts(issuable, users: [])
+    users.each do |user|
+      user.public_send("invalidate_#{issuable.model_name.singular}_cache_counts") # rubocop:disable GitlabSecurity/PublicSend
     end
-
-    if issuable.previous_changes.include?('description')
-      if issuable.tasks? && issuable.updated_tasks.any?
-        create_task_status_note(issuable)
-      else
-        # TODO: Show this note if non-task content was modified.
-        # https://gitlab.com/gitlab-org/gitlab-ce/issues/33577
-        create_description_change_note(issuable)
-      end
-    end
-
-    if issuable.previous_changes.include?('time_estimate')
-      create_time_estimate_note(issuable)
-    end
-
-    if issuable.time_spent?
-      create_time_spent_note(issuable)
-    end
-
-    create_labels_note(issuable, old_labels) if issuable.labels != old_labels
   end
 
-  def invalidate_cache_counts(users, issuable)
-    users.each do |user|
-      user.public_send("invalidate_#{issuable.model_name.singular}_cache_counts")
-    end
+  # override if needed
+  def handle_changes(issuable, options)
+  end
+
+  # override if needed
+  def execute_hooks(issuable, action = 'open', params = {})
+  end
+
+  def update_project_counter_caches?(issuable)
+    issuable.state_changed?
   end
 end

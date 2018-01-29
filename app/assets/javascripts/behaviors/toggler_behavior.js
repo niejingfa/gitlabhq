@@ -1,4 +1,3 @@
-
 // Toggle button. Show/hide content inside parent container.
 // Button does not change visibility. If button has icon - it changes chevron style.
 //
@@ -6,6 +5,7 @@
 //   %button.js-toggle-button
 //   %div.js-toggle-content
 //
+import { getLocationHash } from '../lib/utils/url_utility';
 
 $(() => {
   function toggleContainer(container, toggleState) {
@@ -33,7 +33,7 @@ $(() => {
 
   // If we're accessing a permalink, ensure it is not inside a
   // closed js-toggle-container!
-  const hash = window.gl.utils.getLocationHash();
+  const hash = getLocationHash();
   const anchor = hash && document.getElementById(hash);
   const container = anchor && $(anchor).closest('.js-toggle-container');
 

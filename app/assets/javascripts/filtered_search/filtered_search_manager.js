@@ -1,8 +1,12 @@
+import _ from 'underscore';
+import { visitUrl } from '../lib/utils/url_utility';
+import Flash from '../flash';
 import FilteredSearchContainer from './container';
 import RecentSearchesRoot from './recent_searches_root';
 import RecentSearchesStore from './stores/recent_searches_store';
 import RecentSearchesService from './services/recent_searches_service';
 import eventHub from './event_hub';
+import { addClassIfElementExists } from '../lib/utils/dom_utils';
 
 class FilteredSearchManager {
   constructor(page) {
@@ -19,13 +23,13 @@ class FilteredSearchManager {
       allowedKeys: this.filteredSearchTokenKeys.getKeys(),
     });
     this.searchHistoryDropdownElement = document.querySelector('.js-filtered-search-history-dropdown');
-    const projectPath = this.searchHistoryDropdownElement ?
-      this.searchHistoryDropdownElement.dataset.projectFullPath : 'project';
+    const fullPath = this.searchHistoryDropdownElement ?
+      this.searchHistoryDropdownElement.dataset.fullPath : 'project';
     let recentSearchesPagePrefix = 'issue-recent-searches';
     if (this.page === 'merge_requests') {
       recentSearchesPagePrefix = 'merge-request-recent-searches';
     }
-    const recentSearchesKey = `${projectPath}-${recentSearchesPagePrefix}`;
+    const recentSearchesKey = `${fullPath}-${recentSearchesPagePrefix}`;
     this.recentSearchesService = new RecentSearchesService(recentSearchesKey);
   }
 
@@ -35,11 +39,15 @@ class FilteredSearchManager {
       .catch((error) => {
         if (error.name === 'RecentSearchesServiceError') return undefined;
         // eslint-disable-next-line no-new
-        new window.Flash('An error occured while parsing recent searches');
+        new Flash('An error occurred while parsing recent searches');
         // Gracefully fail to empty array
         return [];
       })
       .then((searches) => {
+        if (!searches) {
+          return;
+        }
+
         // Put any searches that may have come in before
         // we fetched the saved searches ahead of the already saved ones
         const resultantSearches = this.recentSearchesStore.setRecentSearches(
@@ -120,7 +128,7 @@ class FilteredSearchManager {
     this.handleInputVisualTokenWrapper = this.handleInputVisualToken.bind(this);
     this.checkForEnterWrapper = this.checkForEnter.bind(this);
     this.onClearSearchWrapper = this.onClearSearch.bind(this);
-    this.checkForBackspaceWrapper = this.checkForBackspace.bind(this);
+    this.checkForBackspaceWrapper = this.checkForBackspace.call(this);
     this.removeSelectedTokenKeydownWrapper = this.removeSelectedTokenKeydown.bind(this);
     this.unselectEditTokensWrapper = this.unselectEditTokens.bind(this);
     this.editTokenWrapper = this.editToken.bind(this);
@@ -173,22 +181,34 @@ class FilteredSearchManager {
     this.unbindStateEvents();
   }
 
-  checkForBackspace(e) {
-    // 8 = Backspace Key
-    // 46 = Delete Key
-    if (e.keyCode === 8 || e.keyCode === 46) {
-      const { lastVisualToken } = gl.FilteredSearchVisualTokens.getLastVisualTokenBeforeInput();
+  checkForBackspace() {
+    let backspaceCount = 0;
 
-      const sanitizedTokenName = lastVisualToken && lastVisualToken.querySelector('.name').textContent.trim();
-      const canEdit = sanitizedTokenName && this.canEdit && this.canEdit(sanitizedTokenName);
-      if (this.filteredSearchInput.value === '' && lastVisualToken && canEdit) {
-        this.filteredSearchInput.value = gl.FilteredSearchVisualTokens.getLastTokenPartial();
-        gl.FilteredSearchVisualTokens.removeLastTokenPartial();
+    // closure for keeping track of the number of backspace keystrokes
+    return (e) => {
+      // 8 = Backspace Key
+      // 46 = Delete Key
+      if (e.keyCode === 8 || e.keyCode === 46) {
+        const { lastVisualToken } = gl.FilteredSearchVisualTokens.getLastVisualTokenBeforeInput();
+        const { tokenName, tokenValue } = gl.DropdownUtils.getVisualTokenValues(lastVisualToken);
+        const canEdit = tokenName && this.canEdit && this.canEdit(tokenName, tokenValue);
+
+        if (this.filteredSearchInput.value === '' && lastVisualToken && canEdit) {
+          backspaceCount += 1;
+
+          if (backspaceCount === 2) {
+            backspaceCount = 0;
+            this.filteredSearchInput.value = gl.FilteredSearchVisualTokens.getLastTokenPartial();
+            gl.FilteredSearchVisualTokens.removeLastTokenPartial();
+          }
+        }
+
+        // Reposition dropdown so that it is aligned with cursor
+        this.dropdownManager.updateCurrentDropdownOffset();
+      } else {
+        backspaceCount = 0;
       }
-
-      // Reposition dropdown so that it is aligned with cursor
-      this.dropdownManager.updateCurrentDropdownOffset();
-    }
+    };
   }
 
   checkForEnter(e) {
@@ -223,11 +243,7 @@ class FilteredSearchManager {
   }
 
   addInputContainerFocus() {
-    const inputContainer = this.filteredSearchInput.closest('.filtered-search-box');
-
-    if (inputContainer) {
-      inputContainer.classList.add('focus');
-    }
+    addClassIfElementExists(this.filteredSearchInput.closest('.filtered-search-box'), 'focus');
   }
 
   removeInputContainerFocus(e) {
@@ -331,7 +347,14 @@ class FilteredSearchManager {
     const removeElements = [];
 
     [].forEach.call(this.tokensContainer.children, (t) => {
-      if (t.classList.contains('js-visual-token')) {
+      let canClearToken = t.classList.contains('js-visual-token');
+
+      if (canClearToken) {
+        const { tokenName, tokenValue } = gl.DropdownUtils.getVisualTokenValues(t);
+        canClearToken = this.canEdit && this.canEdit(tokenName, tokenValue);
+      }
+
+      if (canClearToken) {
         removeElements.push(t);
       }
     });
@@ -366,7 +389,7 @@ class FilteredSearchManager {
       const fragments = searchToken.split(':');
       if (fragments.length > 1) {
         const inputValues = fragments[0].split(' ');
-        const tokenKey = inputValues.last();
+        const tokenKey = _.last(inputValues);
 
         if (inputValues.length > 1) {
           inputValues.pop();
@@ -410,8 +433,14 @@ class FilteredSearchManager {
     });
   }
 
+  // allows for modifying params array when a param can't be included in the URL (e.g. Service Desk)
+  getAllParams(urlParams) {
+    return this.modifyUrlParams ? this.modifyUrlParams(urlParams) : urlParams;
+  }
+
   loadSearchParamsFromURL() {
-    const params = gl.utils.getUrlParamsArray();
+    const urlParams = gl.utils.getUrlParamsArray();
+    const params = this.getAllParams(urlParams);
     const usernameParams = this.getUsernameParams();
     let hasFilteredSearch = false;
 
@@ -438,8 +467,13 @@ class FilteredSearchManager {
         const match = this.filteredSearchTokenKeys.searchByKeyParam(keyParam);
 
         if (match) {
-          const indexOf = keyParam.indexOf('_');
-          const sanitizedKey = indexOf !== -1 ? keyParam.slice(0, keyParam.indexOf('_')) : keyParam;
+          // Use lastIndexOf because the token key is allowed to contain underscore
+          // e.g. 'my_reaction' is the token key of 'my_reaction_emoji'
+          const lastIndexOf = keyParam.lastIndexOf('_');
+          let sanitizedKey = lastIndexOf !== -1 ? keyParam.slice(0, lastIndexOf) : keyParam;
+          // Replace underscore with hyphen in the sanitizedkey.
+          // e.g. 'my_reaction' => 'my-reaction'
+          sanitizedKey = sanitizedKey.replace('_', '-');
           const symbol = match.symbol;
           let quotationsToUse = '';
 
@@ -449,7 +483,7 @@ class FilteredSearchManager {
           }
 
           hasFilteredSearch = true;
-          const canEdit = this.canEdit && this.canEdit(sanitizedKey);
+          const canEdit = this.canEdit && this.canEdit(sanitizedKey, sanitizedValue);
           gl.FilteredSearchVisualTokens.addFilterVisualToken(
             sanitizedKey,
             `${symbol}${quotationsToUse}${sanitizedValue}${quotationsToUse}`,
@@ -487,6 +521,7 @@ class FilteredSearchManager {
   }
 
   searchState(e) {
+    e.preventDefault();
     const target = e.currentTarget;
     // remove focus outline after click
     target.blur();
@@ -513,7 +548,10 @@ class FilteredSearchManager {
       const condition = this.filteredSearchTokenKeys
         .searchByConditionKeyValue(token.key, token.value.toLowerCase());
       const { param } = this.filteredSearchTokenKeys.searchByKey(token.key) || {};
-      const keyParam = param ? `${token.key}_${param}` : token.key;
+      // Replace hyphen with underscore to use as request parameter
+      // e.g. 'my-reaction' => 'my_reaction'
+      const underscoredKey = token.key.replace('-', '_');
+      const keyParam = param ? `${underscoredKey}_${param}` : underscoredKey;
       let tokenPath = '';
 
       if (condition) {
@@ -542,7 +580,7 @@ class FilteredSearchManager {
     if (this.updateObject) {
       this.updateObject(parameterizedUrl);
     } else {
-      gl.utils.visitUrl(parameterizedUrl);
+      visitUrl(parameterizedUrl);
     }
   }
 

@@ -1,6 +1,6 @@
-/* global Sortable */
+import Sortable from 'vendor/Sortable';
 import boardNewIssue from './board_new_issue';
-import boardCard from './board_card';
+import boardCard from './board_card.vue';
 import eventHub from '../eventhub';
 import loadingIcon from '../../vue_shared/components/loading_icon.vue';
 
@@ -77,7 +77,7 @@ export default {
       this.showIssueForm = !this.showIssueForm;
     },
     onScroll() {
-      if ((this.scrollTop() > this.scrollHeight() - this.scrollOffset) && !this.list.loadingMore) {
+      if (!this.loadingMore && (this.scrollTop() > this.scrollHeight() - this.scrollOffset)) {
         this.loadNextPage();
       }
     },
@@ -115,7 +115,7 @@ export default {
   },
   mounted() {
     const options = gl.issueBoards.getBoardSortableDefaultOptions({
-      scroll: document.querySelectorAll('.boards-list')[0],
+      scroll: true,
       group: 'issues',
       disabled: this.disabled,
       filter: '.board-list-count, .is-disabled',
@@ -165,11 +165,9 @@ export default {
         v-if="loading">
         <loading-icon />
       </div>
-      <transition name="slide-down">
-        <board-new-issue
-          :list="list"
-          v-if="list.type !== 'closed' && showIssueForm"/>
-      </transition>
+      <board-new-issue
+        :list="list"
+        v-if="list.type !== 'closed' && showIssueForm"/>
       <ul
         class="board-list"
         v-show="!loading"
@@ -189,7 +187,7 @@ export default {
         <li
           class="board-list-count text-center"
           v-if="showCount"
-          data-id="-1">
+          data-issue-id="-1">
 
           <loading-icon
             v-show="list.loadingMore"

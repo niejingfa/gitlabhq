@@ -1,6 +1,6 @@
 require 'spec_helper'
 
-feature 'Cycle Analytics', feature: true, js: true do
+feature 'Cycle Analytics', :js do
   let(:user) { create(:user) }
   let(:guest) { create(:user) }
   let(:project) { create(:project, :repository) }
@@ -14,14 +14,20 @@ feature 'Cycle Analytics', feature: true, js: true do
       before  do
         project.add_master(user)
 
-        login_as(user)
+        sign_in(user)
 
-        visit namespace_project_cycle_analytics_path(project.namespace, project)
+        visit project_cycle_analytics_path(project)
         wait_for_requests
       end
 
       it 'shows introductory message' do
         expect(page).to have_content('Introducing Cycle Analytics')
+      end
+
+      it 'shows pipeline summary' do
+        expect(new_issues_counter).to have_content('-')
+        expect(commits_counter).to have_content('-')
+        expect(deploys_counter).to have_content('-')
       end
 
       it 'shows active stage with empty message' do
@@ -38,8 +44,14 @@ feature 'Cycle Analytics', feature: true, js: true do
         create_cycle
         deploy_master
 
-        login_as(user)
-        visit namespace_project_cycle_analytics_path(project.namespace, project)
+        sign_in(user)
+        visit project_cycle_analytics_path(project)
+      end
+
+      it 'shows pipeline summary' do
+        expect(new_issues_counter).to have_content('1')
+        expect(commits_counter).to have_content('2')
+        expect(deploys_counter).to have_content('1')
       end
 
       it 'shows data on each stage' do
@@ -63,15 +75,29 @@ feature 'Cycle Analytics', feature: true, js: true do
         click_stage('Production')
         expect_issue_to_be_present
       end
+
+      context "when I change the time period observed" do
+        before do
+          _two_weeks_old_issue = create(:issue, project: project, created_at: 2.weeks.ago)
+
+          click_button('Last 30 days')
+          click_link('Last 7 days')
+          wait_for_requests
+        end
+
+        it 'shows only relevant data' do
+          expect(new_issues_counter).to have_content('1')
+        end
+      end
     end
 
     context "when my preferred language is Spanish" do
       before do
         user.update_attribute(:preferred_language, 'es')
 
-        project.team << [user, :master]
-        login_as(user)
-        visit namespace_project_cycle_analytics_path(project.namespace, project)
+        project.add_master(user)
+        sign_in(user)
+        visit project_cycle_analytics_path(project)
         wait_for_requests
       end
 
@@ -87,14 +113,15 @@ feature 'Cycle Analytics', feature: true, js: true do
 
   context "as a guest" do
     before do
+      project.add_developer(user)
       project.add_guest(guest)
 
       allow_any_instance_of(Gitlab::ReferenceExtractor).to receive(:issues).and_return([issue])
       create_cycle
       deploy_master
 
-      login_as(guest)
-      visit namespace_project_cycle_analytics_path(project.namespace, project)
+      sign_in(guest)
+      visit project_cycle_analytics_path(project)
       wait_for_requests
     end
 
@@ -107,6 +134,18 @@ feature 'Cycle Analytics', feature: true, js: true do
       click_stage('Review')
       expect(find('.stage-events')).to have_content('You need permission.')
     end
+  end
+
+  def new_issues_counter
+    find(:xpath, "//p[contains(text(),'New Issue')]/preceding-sibling::h3")
+  end
+
+  def commits_counter
+    find(:xpath, "//p[contains(text(),'Commits')]/preceding-sibling::h3")
+  end
+
+  def deploys_counter
+    find(:xpath, "//p[contains(text(),'Deploy')]/preceding-sibling::h3")
   end
 
   def expect_issue_to_be_present

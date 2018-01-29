@@ -20,7 +20,6 @@ describe Gitlab::TaskHelpers do
 
     it 'checkout the version and reset to it' do
       expect(subject).to receive(:checkout_version).with(tag, clone_path)
-      expect(subject).to receive(:reset_to_version).with(tag, clone_path)
 
       subject.checkout_or_clone_version(version: version, repo: repo, target_dir: clone_path)
     end
@@ -31,7 +30,6 @@ describe Gitlab::TaskHelpers do
 
       it 'checkout the version and reset to it with a branch name' do
         expect(subject).to receive(:checkout_version).with(branch, clone_path)
-        expect(subject).to receive(:reset_to_version).with(branch, clone_path)
 
         subject.checkout_or_clone_version(version: version, repo: repo, target_dir: clone_path)
       end
@@ -60,8 +58,8 @@ describe Gitlab::TaskHelpers do
 
   describe '#clone_repo' do
     it 'clones the repo in the target dir' do
-      expect(subject).
-        to receive(:run_command!).with(%W[#{Gitlab.config.git.bin_path} clone -- #{repo} #{clone_path}])
+      expect(subject)
+        .to receive(:run_command!).with(%W[#{Gitlab.config.git.bin_path} clone -- #{repo} #{clone_path}])
 
       subject.clone_repo(repo, clone_path)
     end
@@ -69,21 +67,32 @@ describe Gitlab::TaskHelpers do
 
   describe '#checkout_version' do
     it 'clones the repo in the target dir' do
-      expect(subject).
-        to receive(:run_command!).with(%W[#{Gitlab.config.git.bin_path} -C #{clone_path} fetch --quiet])
-      expect(subject).
-        to receive(:run_command!).with(%W[#{Gitlab.config.git.bin_path} -C #{clone_path} checkout --quiet #{tag}])
+      expect(subject)
+        .to receive(:run_command!).with(%W[#{Gitlab.config.git.bin_path} -C #{clone_path} fetch --quiet origin #{tag}])
+      expect(subject)
+        .to receive(:run_command!).with(%W[#{Gitlab.config.git.bin_path} -C #{clone_path} checkout -f --quiet FETCH_HEAD --])
 
       subject.checkout_version(tag, clone_path)
     end
   end
 
-  describe '#reset_to_version' do
-    it 'resets --hard to the given version' do
-      expect(subject).
-        to receive(:run_command!).with(%W[#{Gitlab.config.git.bin_path} -C #{clone_path} reset --hard #{tag}])
+  describe '#run_command' do
+    it 'runs command and return the output' do
+      expect(subject.run_command(%w(echo it works!))).to eq("it works!\n")
+    end
 
-      subject.reset_to_version(tag, clone_path)
+    it 'returns empty string when command doesnt exist' do
+      expect(subject.run_command(%w(nonexistentcommand with arguments))).to eq('')
+    end
+  end
+
+  describe '#run_command!' do
+    it 'runs command and return the output' do
+      expect(subject.run_command!(%w(echo it works!))).to eq("it works!\n")
+    end
+
+    it 'returns and exception when command exit with non zero code' do
+      expect { subject.run_command!(['bash', '-c', 'exit 1']) }.to raise_error Gitlab::TaskFailedError
     end
   end
 end

@@ -28,7 +28,7 @@ describe Oauth::AuthorizationsController do
       it 'returns 200 code and renders error view' do
         get :new
 
-        expect(response).to have_http_status(200)
+        expect(response).to have_gitlab_http_status(200)
         expect(response).to render_template('doorkeeper/authorizations/error')
       end
     end
@@ -37,18 +37,18 @@ describe Oauth::AuthorizationsController do
       it 'returns 200 code and renders view' do
         get :new, params
 
-        expect(response).to have_http_status(200)
+        expect(response).to have_gitlab_http_status(200)
         expect(response).to render_template('doorkeeper/authorizations/new')
       end
 
       it 'deletes session.user_return_to and redirects when skip authorization' do
+        doorkeeper.update(trusted: true)
         request.session['user_return_to'] = 'http://example.com'
-        allow(controller).to receive(:skip_authorization?).and_return(true)
 
         get :new, params
 
         expect(request.session['user_return_to']).to be_nil
-        expect(response).to have_http_status(302)
+        expect(response).to have_gitlab_http_status(302)
       end
     end
   end

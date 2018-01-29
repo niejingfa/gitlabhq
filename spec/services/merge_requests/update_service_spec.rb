@@ -1,8 +1,6 @@
 require 'spec_helper'
 
-describe MergeRequests::UpdateService, services: true do
-  include EmailHelpers
-
+describe MergeRequests::UpdateService, :mailer do
   let(:project) { create(:project, :repository) }
   let(:user) { create(:user) }
   let(:user2) { create(:user) }
@@ -18,9 +16,9 @@ describe MergeRequests::UpdateService, services: true do
   end
 
   before do
-    project.team << [user, :master]
-    project.team << [user2, :developer]
-    project.team << [user3, :developer]
+    project.add_master(user)
+    project.add_developer(user2)
+    project.add_developer(user3)
   end
 
   describe 'execute' do
@@ -51,11 +49,12 @@ describe MergeRequests::UpdateService, services: true do
           state_event: 'close',
           label_ids: [label.id],
           target_branch: 'target',
-          force_remove_source_branch: '1'
+          force_remove_source_branch: '1',
+          discussion_locked: true
         }
       end
 
-      let(:service) { MergeRequests::UpdateService.new(project, user, opts) }
+      let(:service) { described_class.new(project, user, opts) }
 
       before do
         allow(service).to receive(:execute_hooks)
@@ -66,7 +65,7 @@ describe MergeRequests::UpdateService, services: true do
         end
       end
 
-      it 'mathces base expectations' do
+      it 'matches base expectations' do
         expect(@merge_request).to be_valid
         expect(@merge_request.title).to eq('New title')
         expect(@merge_request.assignee).to eq(user2)
@@ -75,11 +74,21 @@ describe MergeRequests::UpdateService, services: true do
         expect(@merge_request.labels.first.title).to eq(label.name)
         expect(@merge_request.target_branch).to eq('target')
         expect(@merge_request.merge_params['force_remove_source_branch']).to eq('1')
+        expect(@merge_request.discussion_locked).to be_truthy
       end
 
       it 'executes hooks with update action' do
-        expect(service).to have_received(:execute_hooks).
-                               with(@merge_request, 'update')
+        expect(service).to have_received(:execute_hooks)
+          .with(
+            @merge_request,
+            'update',
+            old_associations: {
+              labels: [],
+              mentioned_users: [user2],
+              assignees: [user3],
+              total_time_spent: 0
+            }
+          )
       end
 
       it 'sends email to user2 about assign of new merge request and email to user3 about merge request unassignment' do
@@ -125,6 +134,13 @@ describe MergeRequests::UpdateService, services: true do
         expect(note.note).to eq 'changed target branch from `master` to `target`'
       end
 
+      it 'creates system note about discussion lock' do
+        note = find_note('locked this merge request')
+
+        expect(note).not_to be_nil
+        expect(note.note).to eq 'locked this merge request'
+      end
+
       context 'when not including source branch removal options' do
         before do
           opts.delete(:force_remove_source_branch)
@@ -145,7 +161,7 @@ describe MergeRequests::UpdateService, services: true do
         }
       end
 
-      let(:service) { MergeRequests::UpdateService.new(project, user, opts) }
+      let(:service) { described_class.new(project, user, opts) }
 
       context 'without pipeline' do
         before do
@@ -195,8 +211,8 @@ describe MergeRequests::UpdateService, services: true do
             head_pipeline_of: merge_request
           )
 
-          expect(MergeRequests::MergeWhenPipelineSucceedsService).to receive(:new).with(project, user).
-            and_return(service_mock)
+          expect(MergeRequests::MergeWhenPipelineSucceedsService).to receive(:new).with(project, user)
+            .and_return(service_mock)
           expect(service_mock).to receive(:execute).with(merge_request)
         end
 
@@ -205,7 +221,7 @@ describe MergeRequests::UpdateService, services: true do
 
       context 'with a non-authorised user' do
         let(:visitor) { create(:user) }
-        let(:service) { MergeRequests::UpdateService.new(project, visitor, opts) }
+        let(:service) { described_class.new(project, visitor, opts) }
 
         before do
           merge_request.update_attribute(:merge_error, 'Error')
@@ -296,13 +312,13 @@ describe MergeRequests::UpdateService, services: true do
       end
 
       context 'when the milestone change' do
-        before do
-          update_merge_request({ milestone: create(:milestone) })
-        end
-
         it 'marks pending todos as done' do
+          update_merge_request({ milestone: create(:milestone) })
+
           expect(pending_todo.reload).to be_done
         end
+
+        it_behaves_like 'system notes for milestones'
       end
 
       context 'when the labels change' do
@@ -340,15 +356,15 @@ describe MergeRequests::UpdateService, services: true do
       let!(:subscriber) { create(:user) { |u| label.toggle_subscription(u, project) } }
 
       before do
-        project.team << [non_subscriber, :developer]
-        project.team << [subscriber, :developer]
+        project.add_developer(non_subscriber)
+        project.add_developer(subscriber)
       end
 
       it 'sends notifications for subscribers of newly added labels' do
         opts = { label_ids: [label.id] }
 
         perform_enqueued_jobs do
-          @merge_request = MergeRequests::UpdateService.new(project, user, opts).execute(merge_request)
+          @merge_request = described_class.new(project, user, opts).execute(merge_request)
         end
 
         should_email(subscriber)
@@ -364,7 +380,7 @@ describe MergeRequests::UpdateService, services: true do
           opts = { label_ids: [label.id, label2.id] }
 
           perform_enqueued_jobs do
-            @merge_request = MergeRequests::UpdateService.new(project, user, opts).execute(merge_request)
+            @merge_request = described_class.new(project, user, opts).execute(merge_request)
           end
 
           should_not_email(subscriber)
@@ -375,7 +391,7 @@ describe MergeRequests::UpdateService, services: true do
           opts = { label_ids: [label2.id] }
 
           perform_enqueued_jobs do
-            @merge_request = MergeRequests::UpdateService.new(project, user, opts).execute(merge_request)
+            @merge_request = described_class.new(project, user, opts).execute(merge_request)
           end
 
           should_not_email(subscriber)
@@ -386,7 +402,7 @@ describe MergeRequests::UpdateService, services: true do
 
     context 'updating mentions' do
       let(:mentionable) { merge_request }
-      include_examples 'updating mentions', MergeRequests::UpdateService
+      include_examples 'updating mentions', described_class
     end
 
     context 'when MergeRequest has tasks' do
@@ -511,7 +527,7 @@ describe MergeRequests::UpdateService, services: true do
             feature_visibility_attr = :"#{merge_request.model_name.plural}_access_level"
             project.project_feature.update_attribute(feature_visibility_attr, ProjectFeature::PRIVATE)
 
-            expect{ update_merge_request(assignee_id: assignee) }.not_to change{ merge_request.assignee }
+            expect { update_merge_request(assignee_id: assignee) }.not_to change { merge_request.assignee }
           end
         end
       end

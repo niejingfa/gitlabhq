@@ -1,8 +1,9 @@
 require "spec_helper"
 
 describe Gitlab::Git::Tree, seed_helper: true do
+  let(:repository) { Gitlab::Git::Repository.new('default', TEST_REPO_PATH, '') }
+
   context :repo do
-    let(:repository) { Gitlab::Git::Repository.new('default', TEST_REPO_PATH) }
     let(:tree) { Gitlab::Git::Tree.where(repository, SeedRepo::Commit::ID) }
 
     it { expect(tree).to be_kind_of Array }
@@ -19,6 +20,7 @@ describe Gitlab::Git::Tree, seed_helper: true do
       it { expect(dir.commit_id).to eq(SeedRepo::Commit::ID) }
       it { expect(dir.name).to eq('encoding') }
       it { expect(dir.path).to eq('encoding') }
+      it { expect(dir.flat_path).to eq('encoding') }
       it { expect(dir.mode).to eq('40000') }
 
       context :subdir do
@@ -29,6 +31,7 @@ describe Gitlab::Git::Tree, seed_helper: true do
         it { expect(subdir.commit_id).to eq(SeedRepo::Commit::ID) }
         it { expect(subdir.name).to eq('html') }
         it { expect(subdir.path).to eq('files/html') }
+        it { expect(subdir.flat_path).to eq('files/html') }
       end
 
       context :subdir_file do
@@ -39,6 +42,7 @@ describe Gitlab::Git::Tree, seed_helper: true do
         it { expect(subdir_file.commit_id).to eq(SeedRepo::Commit::ID) }
         it { expect(subdir_file.name).to eq('popen.rb') }
         it { expect(subdir_file.path).to eq('files/ruby/popen.rb') }
+        it { expect(subdir_file.flat_path).to eq('files/ruby/popen.rb') }
       end
     end
 
@@ -72,6 +76,26 @@ describe Gitlab::Git::Tree, seed_helper: true do
       it { expect(submodule.id).to eq('79bceae69cb5750d6567b223597999bfa91cb3b9') }
       it { expect(submodule.commit_id).to eq('570e7b2abdd848b95f2f578043fc23bd6f6fd24d') }
       it { expect(submodule.name).to eq('gitlab-shell') }
+    end
+  end
+
+  describe '#where' do
+    context 'with gitaly disabled' do
+      before do
+        allow(Gitlab::GitalyClient).to receive(:feature_enabled?).and_return(false)
+      end
+
+      it 'calls #tree_entries_from_rugged' do
+        expect(described_class).to receive(:tree_entries_from_rugged)
+
+        described_class.where(repository, SeedRepo::Commit::ID, '/')
+      end
+    end
+
+    it 'gets the tree entries from GitalyClient' do
+      expect_any_instance_of(Gitlab::GitalyClient::CommitService).to receive(:tree_entries)
+
+      described_class.where(repository, SeedRepo::Commit::ID, '/')
     end
   end
 end

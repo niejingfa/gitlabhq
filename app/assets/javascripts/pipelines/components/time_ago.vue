@@ -1,10 +1,16 @@
 <script>
   import iconTimerSvg from 'icons/_icon_timer.svg';
   import '../../lib/utils/datetime_utility';
-  import tooltipMixin from '../../vue_shared/mixins/tooltip';
+  import tooltip from '../../vue_shared/directives/tooltip';
   import timeagoMixin from '../../vue_shared/mixins/timeago';
 
   export default {
+    directives: {
+      tooltip,
+    },
+    mixins: [
+      timeagoMixin,
+    ],
     props: {
       finishedTime: {
         type: String,
@@ -15,10 +21,6 @@
         required: true,
       },
     },
-    mixins: [
-      tooltipMixin,
-      timeagoMixin,
-    ],
     data() {
       return {
         iconTimerSvg,
@@ -55,31 +57,42 @@
   };
 </script>
 <template>
-  <td class="pipelines-time-ago">
-    <p
-      class="duration"
-      v-if="hasDuration">
-      <span v-html="iconTimerSvg">
-      </span>
-      {{durationFormated}}
-    </p>
+  <div class="table-section section-15 pipelines-time-ago">
+    <div
+      class="table-mobile-header"
+      role="rowheader"
+    >
+      Duration
+    </div>
+    <div class="table-mobile-content">
+      <p
+        class="duration"
+        v-if="hasDuration"
+      >
+        <span v-html="iconTimerSvg">
+        </span>
+        {{ durationFormated }}
+      </p>
 
-    <p
-      class="finished-at"
-      v-if="hasFinishedTime">
+      <p
+        class="finished-at hidden-xs hidden-sm"
+        v-if="hasFinishedTime"
+      >
 
-      <i
-        class="fa fa-calendar"
-        aria-hidden="true">
-      </i>
+        <i
+          class="fa fa-calendar"
+          aria-hidden="true"
+        >
+        </i>
 
-      <time
-        ref="tooltip"
-        data-placement="top"
-        data-container="body"
-        :title="tooltipTitle(finishedTime)">
-        {{timeFormated(finishedTime)}}
-      </time>
-    </p>
-  </td>
-</script>
+        <time
+          v-tooltip
+          data-placement="top"
+          data-container="body"
+          :title="tooltipTitle(finishedTime)">
+          {{ timeFormated(finishedTime) }}
+        </time>
+      </p>
+    </div>
+  </div>
+</template>

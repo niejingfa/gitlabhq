@@ -1,12 +1,11 @@
 /* eslint-disable space-before-function-paren, no-unused-expressions, no-var, object-shorthand, comma-dangle, max-len */
-/* global Notes */
-
-import 'vendor/autosize';
+import _ from 'underscore';
+import * as urlUtils from '~/lib/utils/url_utility';
+import 'autosize';
 import '~/gl_form';
 import '~/lib/utils/text_utility';
 import '~/render_gfm';
-import '~/render_math';
-import '~/notes';
+import Notes from '~/notes';
 
 (function() {
   window.gon || (window.gon = {});
@@ -32,14 +31,19 @@ import '~/notes';
 
   describe('Notes', function() {
     const FLASH_TYPE_ALERT = 'alert';
-    var commentsTemplate = 'issues/issue_with_comment.html.raw';
+    var commentsTemplate = 'merge_requests/merge_request_with_comment.html.raw';
     preloadFixtures(commentsTemplate);
 
     beforeEach(function () {
       loadFixtures(commentsTemplate);
       gl.utils.disableButtonIfEmptyField = _.noop;
       window.project_uploads_path = 'http://test.host/uploads';
-      $('body').data('page', 'projects:issues:show');
+      $('body').attr('data-page', 'projects:merge_requets:show');
+    });
+
+    afterEach(() => {
+      // Undo what we did to the shared <body>
+      $('body').removeAttr('data-page');
     });
 
     describe('task lists', function() {
@@ -53,17 +57,19 @@ import '~/notes';
       it('modifies the Markdown field', function() {
         const changeEvent = document.createEvent('HTMLEvents');
         changeEvent.initEvent('change', true, true);
-        $('input[type=checkbox]').attr('checked', true)[0].dispatchEvent(changeEvent);
-        expect($('.js-task-list-field').val()).toBe('- [x] Task List Item');
+        $('input[type=checkbox]').attr('checked', true)[1].dispatchEvent(changeEvent);
+
+        expect($('.js-task-list-field.original-task-list').val()).toBe('- [x] Task List Item');
       });
 
       it('submits an ajax request on tasklist:changed', function() {
         spyOn(jQuery, 'ajax').and.callFake(function(req) {
           expect(req.type).toBe('PATCH');
-          expect(req.url).toBe('http://test.host/frontend-fixtures/issues-project/notes/1');
+          expect(req.url).toBe('http://test.host/frontend-fixtures/merge-requests-project/merge_requests/1.json');
           return expect(req.data.note).not.toBe(null);
         });
-        $('.js-task-list-field').trigger('tasklist:changed');
+
+        $('.js-task-list-field.js-note-text').trigger('tasklist:changed');
       });
     });
 
@@ -95,6 +101,16 @@ import '~/notes';
 
         $('.js-comment-button').click();
         expect(this.autoSizeSpy).toHaveBeenTriggered();
+      });
+
+      it('should not place escaped text in the comment box in case of error', function() {
+        const deferred = $.Deferred();
+        spyOn($, 'ajax').and.returnValue(deferred.promise());
+        $(textarea).text('A comment with `markup`.');
+
+        deferred.reject();
+        $('.js-comment-button').click();
+        expect($(textarea).val()).toEqual('A comment with `markup`.');
       });
     });
 
@@ -152,8 +168,7 @@ import '~/notes';
       });
 
       it('sets target when hash matches', () => {
-        spyOn(gl.utils, 'getLocationHash');
-        gl.utils.getLocationHash.and.returnValue(hash);
+        spyOn(urlUtils, 'getLocationHash').and.returnValue(hash);
 
         Notes.updateNoteTargetSelector($note);
 
@@ -162,8 +177,7 @@ import '~/notes';
       });
 
       it('unsets target when hash does not match', () => {
-        spyOn(gl.utils, 'getLocationHash');
-        gl.utils.getLocationHash.and.returnValue('note_doesnotexist');
+        spyOn(urlUtils, 'getLocationHash').and.returnValue('note_doesnotexist');
 
         Notes.updateNoteTargetSelector($note);
 
@@ -171,12 +185,11 @@ import '~/notes';
       });
 
       it('unsets target when there is not a hash fragment anymore', () => {
-        spyOn(gl.utils, 'getLocationHash');
-        gl.utils.getLocationHash.and.returnValue(null);
+        spyOn(urlUtils, 'getLocationHash').and.returnValue(null);
 
         Notes.updateNoteTargetSelector($note);
 
-        expect($note.toggleClass).toHaveBeenCalledWith('target', null);
+        expect($note.toggleClass).toHaveBeenCalledWith('target', false);
       });
     });
 
@@ -208,7 +221,6 @@ import '~/notes';
         notes.note_ids = [];
         notes.updatedNotesTrackingMap = {};
 
-        spyOn(gl.utils, 'localTimeAgo');
         spyOn(Notes, 'isNewNote').and.callThrough();
         spyOn(Notes, 'isUpdatedNote').and.callThrough();
         spyOn(Notes, 'animateAppendNote').and.callThrough();
@@ -326,6 +338,7 @@ import '~/notes';
           diff_discussion_html: false,
         };
         $form = jasmine.createSpyObj('$form', ['closest', 'find']);
+        $form.length = 1;
         row = jasmine.createSpyObj('row', ['prevAll', 'first', 'find']);
 
         notes = jasmine.createSpyObj('notes', [
@@ -334,7 +347,6 @@ import '~/notes';
         ]);
         notes.note_ids = [];
 
-        spyOn(gl.utils, 'localTimeAgo');
         spyOn(Notes, 'isNewNote');
         spyOn(Notes, 'animateAppendNote');
         Notes.isNewNote.and.returnValue(true);
@@ -354,12 +366,28 @@ import '~/notes';
           $form.closest.and.returnValues(row, $form);
           $form.find.and.returnValues(discussionContainer);
           body.attr.and.returnValue('');
-
-          Notes.prototype.renderDiscussionNote.call(notes, note, $form);
         });
 
         it('should call Notes.animateAppendNote', () => {
+          Notes.prototype.renderDiscussionNote.call(notes, note, $form);
+
           expect(Notes.animateAppendNote).toHaveBeenCalledWith(note.discussion_html, $('.main-notes-list'));
+        });
+
+        it('should append to row selected with line_code', () => {
+          $form.length = 0;
+          note.discussion_line_code = 'line_code';
+          note.diff_discussion_html = '<tr></tr>';
+
+          const line = document.createElement('div');
+          line.id = note.discussion_line_code;
+          document.body.appendChild(line);
+
+          $form.closest.and.returnValues($form);
+
+          Notes.prototype.renderDiscussionNote.call(notes, note, $form);
+
+          expect(line.nextSibling.outerHTML).toEqual(note.diff_discussion_html);
         });
       });
 
@@ -424,19 +452,17 @@ import '~/notes';
     });
 
     describe('putEditFormInPlace', () => {
-      it('should call gl.GLForm with GFM parameter passed through', () => {
-        spyOn(gl, 'GLForm');
+      it('should call GLForm with GFM parameter passed through', () => {
+        const notes = new Notes('', []);
+        const $el = $(`
+          <div>
+            <form></form>
+          </div>
+        `);
 
-        const $el = jasmine.createSpyObj('$form', ['find', 'closest']);
-        $el.find.and.returnValue($('<div>'));
-        $el.closest.and.returnValue($('<div>'));
+        notes.putEditFormInPlace($el);
 
-        Notes.prototype.putEditFormInPlace.call({
-          getEditFormSelector: () => '',
-          enableGFM: true
-        }, $el);
-
-        expect(gl.GLForm).toHaveBeenCalledWith(jasmine.any(Object), true);
+        expect(notes.glForm.enableGFM).toBeTruthy();
       });
     });
 
@@ -523,6 +549,51 @@ import '~/notes';
       });
     });
 
+    describe('postComment with Slash commands', () => {
+      const sampleComment = '/assign @root\n/award :100:';
+      const note = {
+        commands_changes: {
+          assignee_id: 1,
+          emoji_award: '100'
+        },
+        errors: {
+          commands_only: ['Commands applied']
+        },
+        valid: false
+      };
+      let $form;
+      let $notesContainer;
+
+      beforeEach(() => {
+        this.notes = new Notes('', []);
+        window.gon.current_username = 'root';
+        window.gon.current_user_fullname = 'Administrator';
+        gl.awardsHandler = {
+          addAwardToEmojiBar: () => {},
+          scrollToAwards: () => {}
+        };
+        gl.GfmAutoComplete = {
+          dataSources: {
+            commands: '/root/test-project/autocomplete_sources/commands'
+          }
+        };
+        $form = $('form.js-main-target-form');
+        $notesContainer = $('ul.main-notes-list');
+        $form.find('textarea.js-note-text').val(sampleComment);
+      });
+
+      it('should remove slash command placeholder when comment with slash commands is done posting', () => {
+        const deferred = $.Deferred();
+        spyOn($, 'ajax').and.returnValue(deferred.promise());
+        spyOn(gl.awardsHandler, 'addAwardToEmojiBar').and.callThrough();
+        $('.js-comment-button').click();
+
+        expect($notesContainer.find('.system-note.being-posted').length).toEqual(1); // Placeholder shown
+        deferred.resolve(note);
+        expect($notesContainer.find('.system-note.being-posted').length).toEqual(0); // Placeholder removed
+      });
+    });
+
     describe('update comment with script tags', () => {
       const sampleComment = '<script></script>';
       const updatedComment = '<script></script>';
@@ -595,46 +666,46 @@ import '~/notes';
       });
     });
 
-    describe('hasSlashCommands', () => {
+    describe('hasQuickActions', () => {
       beforeEach(() => {
         this.notes = new Notes('', []);
       });
 
-      it('should return true when comment begins with a slash command', () => {
+      it('should return true when comment begins with a quick action', () => {
         const sampleComment = '/wip\n/milestone %1.0\n/merge\n/unassign Merging this';
-        const hasSlashCommands = this.notes.hasSlashCommands(sampleComment);
+        const hasQuickActions = this.notes.hasQuickActions(sampleComment);
 
-        expect(hasSlashCommands).toBeTruthy();
+        expect(hasQuickActions).toBeTruthy();
       });
 
-      it('should return false when comment does NOT begin with a slash command', () => {
+      it('should return false when comment does NOT begin with a quick action', () => {
         const sampleComment = 'Hey, /unassign Merging this';
-        const hasSlashCommands = this.notes.hasSlashCommands(sampleComment);
+        const hasQuickActions = this.notes.hasQuickActions(sampleComment);
 
-        expect(hasSlashCommands).toBeFalsy();
+        expect(hasQuickActions).toBeFalsy();
       });
 
-      it('should return false when comment does NOT have any slash commands', () => {
+      it('should return false when comment does NOT have any quick actions', () => {
         const sampleComment = 'Looking good, Awesome!';
-        const hasSlashCommands = this.notes.hasSlashCommands(sampleComment);
+        const hasQuickActions = this.notes.hasQuickActions(sampleComment);
 
-        expect(hasSlashCommands).toBeFalsy();
+        expect(hasQuickActions).toBeFalsy();
       });
     });
 
-    describe('stripSlashCommands', () => {
-      it('should strip slash commands from the comment which begins with a slash command', () => {
+    describe('stripQuickActions', () => {
+      it('should strip quick actions from the comment which begins with a quick action', () => {
         this.notes = new Notes();
         const sampleComment = '/wip\n/milestone %1.0\n/merge\n/unassign Merging this';
-        const stripedComment = this.notes.stripSlashCommands(sampleComment);
+        const stripedComment = this.notes.stripQuickActions(sampleComment);
 
         expect(stripedComment).toBe('');
       });
 
-      it('should strip slash commands from the comment but leaves plain comment if it is present', () => {
+      it('should strip quick actions from the comment but leaves plain comment if it is present', () => {
         this.notes = new Notes();
         const sampleComment = '/wip\n/milestone %1.0\n/merge\n/unassign\nMerging this';
-        const stripedComment = this.notes.stripSlashCommands(sampleComment);
+        const stripedComment = this.notes.stripQuickActions(sampleComment);
 
         expect(stripedComment).toBe('Merging this');
       });
@@ -642,14 +713,14 @@ import '~/notes';
       it('should NOT strip string that has slashes within', () => {
         this.notes = new Notes();
         const sampleComment = 'http://127.0.0.1:3000/root/gitlab-shell/issues/1';
-        const stripedComment = this.notes.stripSlashCommands(sampleComment);
+        const stripedComment = this.notes.stripQuickActions(sampleComment);
 
         expect(stripedComment).toBe(sampleComment);
       });
     });
 
-    describe('getSlashCommandDescription', () => {
-      const availableSlashCommands = [
+    describe('getQuickActionDescription', () => {
+      const availableQuickActions = [
         { name: 'close', description: 'Close this issue', params: [] },
         { name: 'title', description: 'Change title', params: [{}] },
         { name: 'estimate', description: 'Set time estimate', params: [{}] }
@@ -659,19 +730,19 @@ import '~/notes';
         this.notes = new Notes();
       });
 
-      it('should return executing slash command description when note has single slash command', () => {
+      it('should return executing quick action description when note has single quick action', () => {
         const sampleComment = '/close';
-        expect(this.notes.getSlashCommandDescription(sampleComment, availableSlashCommands)).toBe('Applying command to close this issue');
+        expect(this.notes.getQuickActionDescription(sampleComment, availableQuickActions)).toBe('Applying command to close this issue');
       });
 
-      it('should return generic multiple slash command description when note has multiple slash commands', () => {
+      it('should return generic multiple quick action description when note has multiple quick actions', () => {
         const sampleComment = '/close\n/title [Duplicate] Issue foobar';
-        expect(this.notes.getSlashCommandDescription(sampleComment, availableSlashCommands)).toBe('Applying multiple commands');
+        expect(this.notes.getQuickActionDescription(sampleComment, availableQuickActions)).toBe('Applying multiple commands');
       });
 
-      it('should return generic slash command description when available slash commands list is not populated', () => {
+      it('should return generic quick action description when available quick actions list is not populated', () => {
         const sampleComment = '/close\n/title [Duplicate] Issue foobar';
-        expect(this.notes.getSlashCommandDescription(sampleComment)).toBe('Applying command');
+        expect(this.notes.getQuickActionDescription(sampleComment)).toBe('Applying command');
       });
     });
 
@@ -723,6 +794,20 @@ import '~/notes';
         expect($tempNote.prop('nodeName')).toEqual('LI');
         expect($tempNote.find('.timeline-content').hasClass('discussion')).toBeTruthy();
       });
+
+      it('should return a escaped user name', () => {
+        const currentUserFullnameXSS = 'Foo <script>alert("XSS")</script>';
+        const $tempNote = this.notes.createPlaceholderNote({
+          formContent: sampleComment,
+          uniqueId,
+          isDiscussionNote: false,
+          currentUsername,
+          currentUserFullname: currentUserFullnameXSS,
+          currentUserAvatar,
+        });
+        const $tempNoteHeader = $tempNote.find('.note-header');
+        expect($tempNoteHeader.find('.hidden-xs').text().trim()).toEqual('Foo &lt;script&gt;alert(&quot;XSS&quot;)&lt;/script&gt;');
+      });
     });
 
     describe('createPlaceholderSystemNote', () => {
@@ -754,7 +839,7 @@ import '~/notes';
       });
 
       it('shows a flash message', () => {
-        this.notes.addFlash('Error message', FLASH_TYPE_ALERT, this.notes.parentTimeline);
+        this.notes.addFlash('Error message', FLASH_TYPE_ALERT, this.notes.parentTimeline.get(0));
 
         expect($('.flash-alert').is(':visible')).toBeTruthy();
       });
@@ -767,7 +852,7 @@ import '~/notes';
       });
 
       it('hides visible flash message', () => {
-        this.notes.addFlash('Error message 1', FLASH_TYPE_ALERT, this.notes.parentTimeline);
+        this.notes.addFlash('Error message 1', FLASH_TYPE_ALERT, this.notes.parentTimeline.get(0));
 
         this.notes.clearFlash();
 

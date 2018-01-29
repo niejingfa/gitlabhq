@@ -2,7 +2,7 @@ require 'spec_helper'
 
 describe Projects::EnvironmentsController do
   set(:user) { create(:user) }
-  set(:project) { create(:empty_project) }
+  set(:project) { create(:project) }
 
   set(:environment) do
     create(:environment, name: 'production', project: project)
@@ -19,7 +19,7 @@ describe Projects::EnvironmentsController do
       it 'responds with status code 200' do
         get :index, environment_params
 
-        expect(response).to have_http_status(:ok)
+        expect(response).to have_gitlab_http_status(:ok)
       end
     end
 
@@ -59,7 +59,7 @@ describe Projects::EnvironmentsController do
         end
 
         it 'sets the polling interval header' do
-          expect(response).to have_http_status(:ok)
+          expect(response).to have_gitlab_http_status(:ok)
           expect(response.headers['Poll-Interval']).to eq("3000")
         end
       end
@@ -137,7 +137,7 @@ describe Projects::EnvironmentsController do
         params[:id] = 12345
         get :show, params
 
-        expect(response).to have_http_status(404)
+        expect(response).to have_gitlab_http_status(404)
       end
     end
   end
@@ -155,7 +155,7 @@ describe Projects::EnvironmentsController do
       patch_params = environment_params.merge(environment: { external_url: 'https://git.gitlab.com' })
       patch :update, patch_params
 
-      expect(response).to have_http_status(302)
+      expect(response).to have_gitlab_http_status(302)
     end
   end
 
@@ -166,7 +166,7 @@ describe Projects::EnvironmentsController do
 
         patch :stop, environment_params(format: :json)
 
-        expect(response).to have_http_status(404)
+        expect(response).to have_gitlab_http_status(404)
       end
     end
 
@@ -179,10 +179,10 @@ describe Projects::EnvironmentsController do
 
         patch :stop, environment_params(format: :json)
 
-        expect(response).to have_http_status(200)
+        expect(response).to have_gitlab_http_status(200)
         expect(json_response).to eq(
           { 'redirect_url' =>
-              namespace_project_job_url(project.namespace, project, action) })
+              project_job_url(project, action) })
       end
     end
 
@@ -193,10 +193,10 @@ describe Projects::EnvironmentsController do
 
         patch :stop, environment_params(format: :json)
 
-        expect(response).to have_http_status(200)
+        expect(response).to have_gitlab_http_status(200)
         expect(json_response).to eq(
           { 'redirect_url' =>
-              namespace_project_environment_url(project.namespace, project, environment) })
+              project_environment_url(project, environment) })
       end
     end
   end
@@ -206,7 +206,7 @@ describe Projects::EnvironmentsController do
       it 'responds with a status code 200' do
         get :terminal, environment_params
 
-        expect(response).to have_http_status(200)
+        expect(response).to have_gitlab_http_status(200)
       end
 
       it 'loads the terminals for the enviroment' do
@@ -220,7 +220,7 @@ describe Projects::EnvironmentsController do
       it 'responds with a status code 404' do
         get :terminal, environment_params(id: 666)
 
-        expect(response).to have_http_status(404)
+        expect(response).to have_gitlab_http_status(404)
       end
     end
   end
@@ -233,18 +233,18 @@ describe Projects::EnvironmentsController do
 
       context 'and valid id' do
         it 'returns the first terminal for the environment' do
-          expect_any_instance_of(Environment).
-            to receive(:terminals).
-            and_return([:fake_terminal])
+          expect_any_instance_of(Environment)
+            .to receive(:terminals)
+            .and_return([:fake_terminal])
 
-          expect(Gitlab::Workhorse).
-            to receive(:terminal_websocket).
-            with(:fake_terminal).
-            and_return(workhorse: :response)
+          expect(Gitlab::Workhorse)
+            .to receive(:terminal_websocket)
+            .with(:fake_terminal)
+            .and_return(workhorse: :response)
 
           get :terminal_websocket_authorize, environment_params
 
-          expect(response).to have_http_status(200)
+          expect(response).to have_gitlab_http_status(200)
           expect(response.headers["Content-Type"]).to eq(Gitlab::Workhorse::INTERNAL_API_CONTENT_TYPE)
           expect(response.body).to eq('{"workhorse":"response"}')
         end
@@ -254,7 +254,7 @@ describe Projects::EnvironmentsController do
         it 'returns 404' do
           get :terminal_websocket_authorize, environment_params(id: 666)
 
-          expect(response).to have_http_status(404)
+          expect(response).to have_gitlab_http_status(404)
         end
       end
     end
@@ -290,7 +290,7 @@ describe Projects::EnvironmentsController do
         it 'returns a metrics JSON document' do
           get :metrics, environment_params(format: :json)
 
-          expect(response).to have_http_status(204)
+          expect(response).to have_gitlab_http_status(204)
           expect(json_response).to eq({})
         end
       end
@@ -311,6 +311,48 @@ describe Projects::EnvironmentsController do
         expect(response).to be_ok
         expect(json_response['success']).to be(true)
         expect(json_response['metrics']).to eq({})
+        expect(json_response['last_update']).to eq(42)
+      end
+    end
+  end
+
+  describe 'GET #additional_metrics' do
+    before do
+      allow(controller).to receive(:environment).and_return(environment)
+    end
+
+    context 'when environment has no metrics' do
+      before do
+        expect(environment).to receive(:additional_metrics).and_return(nil)
+      end
+
+      context 'when requesting metrics as JSON' do
+        it 'returns a metrics JSON document' do
+          get :additional_metrics, environment_params(format: :json)
+
+          expect(response).to have_gitlab_http_status(204)
+          expect(json_response).to eq({})
+        end
+      end
+    end
+
+    context 'when environment has some metrics' do
+      before do
+        expect(environment)
+          .to receive(:additional_metrics)
+                .and_return({
+                              success: true,
+                              data: {},
+                              last_update: 42
+                            })
+      end
+
+      it 'returns a metrics JSON document' do
+        get :additional_metrics, environment_params(format: :json)
+
+        expect(response).to be_ok
+        expect(json_response['success']).to be(true)
+        expect(json_response['data']).to eq({})
         expect(json_response['last_update']).to eq(42)
       end
     end

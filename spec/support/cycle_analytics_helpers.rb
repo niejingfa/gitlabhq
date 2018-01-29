@@ -5,10 +5,16 @@ module CycleAnalyticsHelpers
   end
 
   def create_commit(message, project, user, branch_name, count: 1)
-    oldrev = project.repository.commit(branch_name).sha
+    repository = project.repository
+    oldrev = repository.commit(branch_name).sha
+
+    if Timecop.frozen? && Gitlab::GitalyClient.feature_enabled?(:operation_user_commit_files)
+      mock_gitaly_multi_action_dates(repository.raw)
+    end
+
     commit_shas = Array.new(count) do |index|
-      commit_sha = project.repository.create_file(user, generate(:branch), "content", message: message, branch_name: branch_name)
-      project.repository.commit(commit_sha)
+      commit_sha = repository.create_file(user, generate(:branch), "content", message: message, branch_name: branch_name)
+      repository.commit(commit_sha)
 
       commit_sha
     end
@@ -41,7 +47,9 @@ module CycleAnalyticsHelpers
       target_branch: 'master'
     }
 
-    MergeRequests::CreateService.new(project, user, opts).execute
+    mr = MergeRequests::CreateService.new(project, user, opts).execute
+    NewMergeRequestWorker.new.perform(mr, user)
+    mr
   end
 
   def merge_merge_requests_closing_issue(issue)
@@ -74,7 +82,12 @@ module CycleAnalyticsHelpers
 
   def dummy_pipeline
     @dummy_pipeline ||=
-      Ci::Pipeline.new(sha: project.repository.commit('master').sha)
+      Ci::Pipeline.new(
+        sha: project.repository.commit('master').sha,
+        ref: 'master',
+        source: :push,
+        project: project,
+        protected: false)
   end
 
   def new_dummy_job(environment)
@@ -87,7 +100,28 @@ module CycleAnalyticsHelpers
       ref: 'master',
       tag: false,
       name: 'dummy',
-      pipeline: dummy_pipeline)
+      stage: 'dummy',
+      pipeline: dummy_pipeline,
+      protected: false)
+  end
+
+  def mock_gitaly_multi_action_dates(raw_repository)
+    allow(raw_repository).to receive(:multi_action).and_wrap_original do |m, *args|
+      new_date = Time.now
+      branch_update = m.call(*args)
+
+      if branch_update.newrev
+        _, opts = args
+        commit = raw_repository.commit(branch_update.newrev).rugged_commit
+        branch_update.newrev = commit.amend(
+          update_ref: "#{Gitlab::Git::BRANCH_REF_PREFIX}#{opts[:branch_name]}",
+          author: commit.author.merge(time: new_date),
+          committer: commit.committer.merge(time: new_date)
+        )
+      end
+
+      branch_update
+    end
   end
 end
 

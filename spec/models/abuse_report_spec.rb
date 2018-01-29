@@ -1,8 +1,9 @@
 require 'rails_helper'
 
-RSpec.describe AbuseReport, type: :model do
-  subject     { create(:abuse_report) }
-  let(:user)  { create(:admin) }
+describe AbuseReport do
+  set(:report) { create(:abuse_report) }
+  set(:user) { create(:admin) }
+  subject { report }
 
   it { expect(subject).to be_valid }
 
@@ -36,8 +37,8 @@ RSpec.describe AbuseReport, type: :model do
 
   describe '#notify' do
     it 'delivers' do
-      expect(AbuseReportMailer).to receive(:notify).with(subject.id).
-        and_return(spy)
+      expect(AbuseReportMailer).to receive(:notify).with(subject.id)
+        .and_return(spy)
 
       subject.notify
     end
